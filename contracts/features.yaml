@@ -1,0 +1,58 @@
+version: "1.0"
+description: "Feature registry for elec-forecast model."
+
+features:
+  - name: consommation_lag_24h
+    type: float
+    source_table: elec_raw.eco2mix
+    description: Consumption (MW) at the same 30-min slot exactly 24h prior.
+
+  - name: consommation_lag_168h
+    type: float
+    source_table: elec_raw.eco2mix
+    description: Consumption (MW) at the same 30-min slot exactly 7 days prior.
+
+  - name: consommation_rolling_7d
+    type: float
+    source_table: elec_raw.eco2mix
+    description: Rolling 7-day mean consumption (MW) for the region.
+
+  - name: temperature_celsius
+    type: float
+    source_table: elec_raw.weather
+    description: Air temperature in °C at region centroid.
+
+  - name: wind_speed_kmh
+    type: float
+    source_table: elec_raw.weather
+    description: Wind speed in km/h at region centroid.
+
+  - name: solar_radiation_wm2
+    type: float
+    source_table: elec_raw.weather
+    description: Surface solar radiation in W/m² at region centroid.
+
+  - name: hour_of_day
+    type: int
+    source_table: derived
+    description: Hour of the 30-min slot (0–23).
+
+  - name: day_of_week
+    type: int
+    source_table: derived
+    description: Day of week (0=Monday … 6=Sunday).
+
+  - name: is_weekend
+    type: bool
+    source_table: derived
+    description: True if Saturday or Sunday.
+
+  - name: is_public_holiday_fr
+    type: bool
+    source_table: derived
+    description: True if French national public holiday (uses `holidays` library).
+
+  - name: month
+    type: int
+    source_table: derived
+    description: Calendar month (1–12).

@@ -1,0 +1,30 @@
+[project]
+name = "elec-jobs"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "google-cloud-bigquery>=3.0",
+    "google-cloud-storage>=2.0",
+    "pandas-gbq>=0.26.1",
+    "lightgbm>=4.0",
+    "mlflow>=2.0",
+    "pandas>=2.0",
+    "requests>=2.31",
+    "scikit-learn>=1.3",
+    "python-dotenv>=1.0",
+    "holidays>=0.40",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

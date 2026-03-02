@@ -1,0 +1,21 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-jobs:${SHORT_SHA}
+      - -f
+      - infra/cloudrun/Dockerfile.jobs
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-jobs:${SHORT_SHA}
+
+substitutions:
+  _REGION: europe-west9
+  _REPO: elec-forecast
+
+options:
+  logging: CLOUD_LOGGING_ONLY

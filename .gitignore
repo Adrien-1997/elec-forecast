@@ -1,0 +1,44 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment
+.env
+*.env.local
+
+# GCP credentials
+*-key.json
+service-account*.json
+gcloud-credentials*.json
+
+# MLflow
+mlruns/
+mlflow.db
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Terraform / infra state (if added later)
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# Claude Code — local AI context (not for version control)
+CLAUDE.md
+.claude/

@@ -1,0 +1,11 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY jobs/ .
+RUN pip install --no-cache-dir .
+
+# JOB_MODULE selects the entry point: ingest | features | train | score
+ENV JOB_MODULE=ingest
+
+ENTRYPOINT ["python", "-m", "elec_jobs"]
