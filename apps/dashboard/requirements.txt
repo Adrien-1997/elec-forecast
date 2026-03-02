@@ -1,0 +1,9 @@
+streamlit>=1.32
+folium>=0.16
+streamlit-folium>=0.18
+plotly>=5.20
+google-cloud-bigquery>=3.17
+pyarrow>=14
+db-dtypes>=1.2
+pandas>=2.1
+python-dotenv>=1.0

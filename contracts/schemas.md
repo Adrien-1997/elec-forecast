@@ -3,7 +3,7 @@
 ## `elec_raw.eco2mix`
 | Column | Type | Description |
 |---|---|---|
-| `date_heure` | TIMESTAMP | 30-min slot (UTC) |
+| `date_heure` | TIMESTAMP | 15-min slot (UTC) |
 | `region` | STRING | French metro region name |
 | `consommation` | FLOAT64 | Consumption in MW |
 | `_ingested_at` | TIMESTAMP | Row insertion time |
@@ -16,7 +16,7 @@
 ## `elec_raw.weather`
 | Column | Type | Description |
 |---|---|---|
-| `date_heure` | TIMESTAMP | 30-min slot (UTC) |
+| `date_heure` | TIMESTAMP | Hourly slot (UTC) |
 | `region` | STRING | French metro region name |
 | `temperature_celsius` | FLOAT64 | °C |
 | `wind_speed_kmh` | FLOAT64 | km/h |
@@ -30,11 +30,11 @@
 ## `elec_features.features`
 | Column | Type | Description |
 |---|---|---|
-| `date_heure` | TIMESTAMP | 30-min slot (UTC) |
+| `date_heure` | TIMESTAMP | 15-min slot (UTC) |
 | `region` | STRING | French metro region name |
 | `consommation_lag_24h` | FLOAT64 | Same slot 24h ago |
 | `consommation_lag_168h` | FLOAT64 | Same slot 7 days ago |
-| `consommation_rolling_7d` | FLOAT64 | 7-day rolling mean |
+| `consommation_rolling_168h` | FLOAT64 | 7-day rolling mean |
 | `temperature_celsius` | FLOAT64 | °C |
 | `wind_speed_kmh` | FLOAT64 | km/h |
 | `solar_radiation_wm2` | FLOAT64 | W/m² |

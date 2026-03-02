@@ -5,14 +5,14 @@ features:
   - name: consommation_lag_24h
     type: float
     source_table: elec_raw.eco2mix
-    description: Consumption (MW) at the same 30-min slot exactly 24h prior.
+    description: Consumption (MW) at the same 15-min slot exactly 24h prior.
 
   - name: consommation_lag_168h
     type: float
     source_table: elec_raw.eco2mix
-    description: Consumption (MW) at the same 30-min slot exactly 7 days prior.
+    description: Consumption (MW) at the same 15-min slot exactly 7 days prior.
 
-  - name: consommation_rolling_7d
+  - name: consommation_rolling_168h
     type: float
     source_table: elec_raw.eco2mix
     description: Rolling 7-day mean consumption (MW) for the region.
@@ -35,7 +35,7 @@ features:
   - name: hour_of_day
     type: int
     source_table: derived
-    description: Hour of the 30-min slot (0–23).
+    description: Hour of the 15-min slot (0–23).
 
   - name: day_of_week
     type: int

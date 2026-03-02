@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS `elec_features.features` (
     region                      STRING      NOT NULL,
     consommation_lag_24h        FLOAT64,
     consommation_lag_168h       FLOAT64,
-    consommation_rolling_7d     FLOAT64,
+    consommation_rolling_168h     FLOAT64,
     temperature_celsius         FLOAT64,
     wind_speed_kmh              FLOAT64,
     solar_radiation_wm2         FLOAT64,
@@ -19,5 +19,5 @@ CREATE TABLE IF NOT EXISTS `elec_features.features` (
 PARTITION BY DATE(date_heure)
 CLUSTER BY region
 OPTIONS (
-    description = "Feature store — 30-min grain per region, used for training and scoring."
+    description = "Feature store — 15-min grain per region, used for training and scoring."
 );

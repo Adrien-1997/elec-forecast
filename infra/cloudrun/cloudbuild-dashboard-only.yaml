@@ -1,0 +1,17 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - europe-west9-docker.pkg.dev/elec-forecast/elec-forecast/elec-dashboard:ttl-fix
+      - -f
+      - apps/dashboard/Dockerfile
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - europe-west9-docker.pkg.dev/elec-forecast/elec-forecast/elec-dashboard:ttl-fix
+images:
+  - europe-west9-docker.pkg.dev/elec-forecast/elec-forecast/elec-dashboard:ttl-fix
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -5,9 +5,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-GCP_PROJECT_ID = os.environ["GCP_PROJECT_ID"]
-GCP_REGION = os.getenv("GCP_REGION", "europe-west9")
-GCS_BUCKET = os.environ["GCS_BUCKET"]
+GCP_PROJECT_ID = os.environ["GCP_PROJECT_ID"].strip()
+GCP_REGION = os.getenv("GCP_REGION", "europe-west9").strip()
+GCS_BUCKET = os.environ["GCS_BUCKET"].strip()
 
 BQ_DATASET_RAW = os.getenv("BQ_DATASET_RAW", "elec_raw")
 BQ_DATASET_FEATURES = os.getenv("BQ_DATASET_FEATURES", "elec_features")

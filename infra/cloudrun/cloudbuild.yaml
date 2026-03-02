@@ -1,4 +1,5 @@
 steps:
+  # ── Jobs image ──────────────────────────────────────────────────────────────
   - name: gcr.io/cloud-builders/docker
     args:
       - build
@@ -12,6 +13,25 @@ steps:
     args:
       - push
       - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-jobs:${SHORT_SHA}
+
+  # ── Dashboard image ─────────────────────────────────────────────────────────
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-dashboard:${SHORT_SHA}
+      - -f
+      - apps/dashboard/Dockerfile
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-dashboard:${SHORT_SHA}
+
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-jobs:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-dashboard:${SHORT_SHA}
 
 substitutions:
   _REGION: europe-west9

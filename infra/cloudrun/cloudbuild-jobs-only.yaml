@@ -1,0 +1,17 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - europe-west9-docker.pkg.dev/elec-forecast/elec-forecast/elec-jobs:libgomp-fix
+      - -f
+      - infra/cloudrun/Dockerfile.jobs
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - europe-west9-docker.pkg.dev/elec-forecast/elec-forecast/elec-jobs:libgomp-fix
+images:
+  - europe-west9-docker.pkg.dev/elec-forecast/elec-forecast/elec-jobs:libgomp-fix
+options:
+  logging: CLOUD_LOGGING_ONLY

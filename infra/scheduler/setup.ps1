@@ -10,10 +10,10 @@ param(
 )
 
 $Jobs = @(
-    @{ Name = "ingest";   Schedule = "*/30 * * * *" },
-    @{ Name = "features"; Schedule = "*/30 * * * *" },
-    @{ Name = "train";    Schedule = "0 2 * * 0"    },  # Sunday 2am
-    @{ Name = "score";    Schedule = "*/30 * * * *" }
+    @{ Name = "ingest";   Schedule = "*/15 * * * *"       },  # :00 :15 :30 :45
+    @{ Name = "features"; Schedule = "2,17,32,47 * * * *" },  # +2 min after ingest
+    @{ Name = "train";    Schedule = "0 2 * * 0"          },  # Sunday 2am
+    @{ Name = "score";    Schedule = "5,20,35,50 * * * *" }   # +5 min after ingest
 )
 
 foreach ($Job in $Jobs) {
