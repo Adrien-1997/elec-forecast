@@ -1,5 +1,13 @@
 # elec-forecast
 
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
+![GCP](https://img.shields.io/badge/GCP-Cloud_Run-4285F4?logo=googlecloud&logoColor=white)
+![BigQuery](https://img.shields.io/badge/BigQuery-elec__raw%20%7C%20features%20%7C%20ml-4285F4?logo=googlebigquery&logoColor=white)
+![LightGBM](https://img.shields.io/badge/Model-LightGBM-2980b9)
+![MLflow](https://img.shields.io/badge/Tracking-MLflow-0194E2?logo=mlflow&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
+[![Live demo](https://img.shields.io/badge/Live_demo-Dashboard-2563EB)](https://elec-dashboard-931951823998.europe-west9.run.app)
+
 End-to-end ML pipeline for **day-ahead electricity demand forecasting** across 12 French metropolitan regions — running live on GCP.
 
 **Live dashboard**: [elec-dashboard-931951823998.europe-west9.run.app](https://elec-dashboard-931951823998.europe-west9.run.app)
