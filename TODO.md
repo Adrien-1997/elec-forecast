@@ -5,13 +5,22 @@
 - [x] Run `.\infra\setup.ps1` — APIs, SA, bucket, Artifact Registry, BQ datasets+tables, secrets
 - [x] Update `.env` with `GCS_BUCKET=elec-forecast-931951823998`
 - [x] Update CLAUDE.md (GCP section + Current Status)
+- [ ] **Migrate infra to Terraform** — replace `infra/setup.ps1` + `infra/scheduler/setup.ps1` with Terraform modules (GCS, BQ datasets+tables, IAM, Secret Manager, Cloud Scheduler); keep `deploy.ps1` for image build + Cloud Run deploy (Cloud Build not easily Terraformable)
+
+## Data quality — ingest bug fixes
+- [x] **Overlap window** (`ingest/run.py`): use `since = MAX(date_heure) - 6h` instead of exact max — re-fetches recent slots so late-publishing regions catch up to 12/12 progressively
+- [x] **Upsert on ingest** (`ingest/run.py`): replace `_append_to_bq` with `_merge_to_bq` (BQ MERGE on `date_heure, region`) to avoid duplicates from the re-fetch overlap
+- [ ] **Deploy + one-time 48h backfill**: rebuild jobs image, redeploy ingest, run manually with `DEFAULT_LOOKBACK_DAYS=2` to retroactively fill incomplete slots already in BQ
 
 ## Jobs — implementation
 - [x] `ingest/run.py` — pull eco2mix (ODRÉ API, paginated) → BQ `elec_raw.eco2mix`
 - [x] `ingest/run.py` — pull Open-Meteo weather per region centroid → BQ `elec_raw.weather`
 - [x] `features/run.py` — compute lags + rolling avg + calendar features → BQ `elec_features.features`
-- [x] `train/run.py` — train LightGBM, log to MLflow, upload model artifact to GCS
-- [x] `score/run.py` — load model from GCS, generate 24h-ahead forecasts → BQ `elec_ml.predictions`
+- [x] `train/run.py` — train LightGBM (+ region as categorical), log to MLflow, upload model artifact to GCS
+- [x] `forecast/run.py` — daily job: lag features from BQ + Open-Meteo forecast weather → 96×12 predictions → UPSERT `elec_ml.predictions`
+- [x] `metrics/run.py` — daily job: predictions × actuals → MAE/p95/p99 rolling 7d → UPSERT `elec_ml.metrics`
+- [x] `shared/bq.py` — `merge_to_bq` utility (used by ingest, forecast, metrics)
+- [ ] Create Cloud Run Jobs for `forecast` and `metrics` (Cloud Scheduler: forecast `0 4 * * *`, metrics `0 6 * * *` UTC); delete old `score` trigger
 
 ## Apps
 - [x] `apps/dashboard/app.py` — forecasts vs actuals per region (folium map + Plotly time series)

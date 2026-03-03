@@ -3,12 +3,13 @@
 Schedule: every 30 min via Cloud Scheduler.
 
 Strategy:
-- Query max(date_heure) already in BQ → fetch only new records.
+- Query max(date_heure) already in BQ, then subtract OVERLAP_HOURS to re-fetch
+  recent slots — ODRÉ regions publish with variable lag (up to ~2h), so without
+  the overlap window late regions are never backfilled and slots stay at 5-6/12.
 - First run (empty table): falls back to DEFAULT_LOOKBACK_DAYS.
+- Upsert via BQ MERGE on (date_heure, region) to avoid duplicates from re-fetch.
 - Weather is stored at hourly granularity; the features job joins by
   TIMESTAMP_TRUNC(date_heure, HOUR).
-- Dedup: simple append; downstream features job uses MAX(_ingested_at)
-  if duplicates appear due to retries.
 """
 
 import logging
@@ -19,11 +20,12 @@ import requests
 from google.cloud import bigquery
 
 from elec_jobs.shared import config
-from elec_jobs.shared.bq import get_client
+from elec_jobs.shared.bq import get_client, merge_to_bq
 
 LOG = logging.getLogger(__name__)
 UTC = timezone.utc
 DEFAULT_LOOKBACK_DAYS = 7  # used on first run or after a gap
+OVERLAP_HOURS = 6           # re-fetch last 6h so late-publishing regions fill in
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -133,20 +135,6 @@ def fetch_weather(since: datetime) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# BQ writes
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _append_to_bq(client: bigquery.Client, df: pd.DataFrame, table: str) -> None:
-    """Append a DataFrame to a fully-qualified BQ table."""
-    job = client.load_table_from_dataframe(
-        df,
-        f"{config.GCP_PROJECT_ID}.{table}",
-        job_config=bigquery.LoadJobConfig(write_disposition="WRITE_APPEND"),
-    )
-    job.result()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -158,29 +146,37 @@ def main() -> None:
     # ── eco2mix ──────────────────────────────────────────────────────────────
     eco2mix_table = f"{config.BQ_DATASET_RAW}.eco2mix"
     max_dt = _bq_max_date_heure(client, eco2mix_table)
-    since_eco2mix = max_dt if max_dt else now - timedelta(days=DEFAULT_LOOKBACK_DAYS)
-    LOG.info("eco2mix: fetching since %s", since_eco2mix.isoformat())
+    since_eco2mix = (
+        max_dt - timedelta(hours=OVERLAP_HOURS)
+        if max_dt else
+        now - timedelta(days=DEFAULT_LOOKBACK_DAYS)
+    )
+    LOG.info("eco2mix: fetching since %s (overlap=%dh)", since_eco2mix.isoformat(), OVERLAP_HOURS)
 
     df_eco2mix = fetch_eco2mix(since_eco2mix)
     if df_eco2mix.empty:
         LOG.info("eco2mix: no new records")
     else:
-        LOG.info("eco2mix: inserting %d rows", len(df_eco2mix))
-        _append_to_bq(client, df_eco2mix, eco2mix_table)
+        LOG.info("eco2mix: upserting %d rows", len(df_eco2mix))
+        merge_to_bq(client, df_eco2mix, config.GCP_PROJECT_ID, eco2mix_table)
         LOG.info("eco2mix: done")
 
     # ── weather ──────────────────────────────────────────────────────────────
     weather_table = f"{config.BQ_DATASET_RAW}.weather"
     max_dt_w = _bq_max_date_heure(client, weather_table)
-    since_weather = max_dt_w if max_dt_w else now - timedelta(days=DEFAULT_LOOKBACK_DAYS)
-    LOG.info("weather: fetching since %s", since_weather.isoformat())
+    since_weather = (
+        max_dt_w - timedelta(hours=OVERLAP_HOURS)
+        if max_dt_w else
+        now - timedelta(days=DEFAULT_LOOKBACK_DAYS)
+    )
+    LOG.info("weather: fetching since %s (overlap=%dh)", since_weather.isoformat(), OVERLAP_HOURS)
 
     df_weather = fetch_weather(since_weather)
     if df_weather.empty:
         LOG.info("weather: no new records")
     else:
-        LOG.info("weather: inserting %d rows", len(df_weather))
-        _append_to_bq(client, df_weather, weather_table)
+        LOG.info("weather: upserting %d rows", len(df_weather))
+        merge_to_bq(client, df_weather, config.GCP_PROJECT_ID, weather_table)
         LOG.info("weather: done")
 
 

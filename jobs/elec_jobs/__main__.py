@@ -12,10 +12,12 @@ match JOB_MODULE:
         from elec_jobs.features.run import main
     case "train":
         from elec_jobs.train.run import main
-    case "score":
-        from elec_jobs.score.run import main
+    case "forecast":
+        from elec_jobs.forecast.run import main
+    case "metrics":
+        from elec_jobs.metrics.run import main
     case _:
-        print(f"Unknown JOB_MODULE={JOB_MODULE!r}. Must be one of: ingest, features, train, score")
+        print(f"Unknown JOB_MODULE={JOB_MODULE!r}. Must be one of: ingest, features, train, forecast, metrics")
         sys.exit(1)
 
 main()

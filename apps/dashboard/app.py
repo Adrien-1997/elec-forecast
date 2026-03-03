@@ -45,20 +45,16 @@ def _bq() -> bigquery.Client:
 
 @st.cache_data(ttl=300)
 def load_latest_forecasts() -> pd.DataFrame:
+    """Load predictions for the past 48h + next 24h window.
+
+    One row per (forecast_horizon_dt, region) — no dedup needed since
+    the forecast job USERTs on that key.
+    """
     sql = f"""
-    WITH ranked AS (
-        SELECT forecast_horizon_dt, region, predicted_mw, model_version, scored_at,
-               ROW_NUMBER() OVER (
-                   PARTITION BY forecast_horizon_dt, region
-                   ORDER BY scored_at DESC
-               ) AS rn
-        FROM `{PROJECT}.elec_ml.predictions`
-        WHERE forecast_horizon_dt >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR)
-          AND forecast_horizon_dt <= TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
-    )
-    SELECT forecast_horizon_dt, region, predicted_mw, model_version, scored_at
-    FROM ranked
-    WHERE rn = 1
+    SELECT forecast_horizon_dt, region, predicted_mw, model_version, forecasted_at
+    FROM `{PROJECT}.elec_ml.predictions`
+    WHERE forecast_horizon_dt >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR)
+      AND forecast_horizon_dt <= TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
     ORDER BY forecast_horizon_dt, region
     """
     return _bq().query(sql).to_dataframe()
@@ -82,35 +78,21 @@ def load_system_status() -> dict:
     SELECT
         (SELECT MAX(_ingested_at)     FROM `{PROJECT}.elec_raw.eco2mix`)       AS last_ingest,
         (SELECT MAX(_materialized_at) FROM `{PROJECT}.elec_features.features`) AS last_features,
-        (SELECT MAX(scored_at)        FROM `{PROJECT}.elec_ml.predictions`)    AS last_score
+        (SELECT MAX(forecasted_at)    FROM `{PROJECT}.elec_ml.predictions`)    AS last_forecast
     """
     return _bq().query(sql).to_dataframe().iloc[0].to_dict()
 
 
 @st.cache_data(ttl=300)
-def load_error_metrics() -> dict:
+def load_metrics() -> pd.DataFrame:
+    """Latest computed metrics for all regions + France total."""
     sql = f"""
-    WITH preds AS (
-        SELECT forecast_horizon_dt, region, predicted_mw
-        FROM `{PROJECT}.elec_ml.predictions`
-        WHERE scored_at = (SELECT MAX(scored_at) FROM `{PROJECT}.elec_ml.predictions`)
-    ),
-    matched AS (
-        SELECT ABS(p.predicted_mw - e.consommation) AS abs_error
-        FROM preds AS p
-        JOIN `{PROJECT}.elec_raw.eco2mix` AS e
-            ON  e.region     = p.region
-            AND e.date_heure = p.forecast_horizon_dt
-            AND e.consommation IS NOT NULL
-    )
-    SELECT
-        COUNT(*)                                     AS n_matched,
-        AVG(abs_error)                               AS mae_mw,
-        APPROX_QUANTILES(abs_error, 100)[OFFSET(95)] AS p95_mw,
-        APPROX_QUANTILES(abs_error, 100)[OFFSET(99)] AS p99_mw
-    FROM matched
+    SELECT region, mae_mw, p95_error_mw, p99_error_mw, n_samples, computed_date
+    FROM `{PROJECT}.elec_ml.metrics`
+    WHERE computed_date = (SELECT MAX(computed_date) FROM `{PROJECT}.elec_ml.metrics`)
+    ORDER BY region
     """
-    return _bq().query(sql).to_dataframe().iloc[0].to_dict()
+    return _bq().query(sql).to_dataframe()
 
 
 @st.cache_data(ttl=300)
@@ -147,13 +129,14 @@ def _ago(ts) -> str:
     if t is None:
         return "—"
     mins = int((pd.Timestamp.now(tz="UTC") - t).total_seconds() / 60)
-    if mins < 1:   return "just now"
-    if mins < 60:  return f"{mins} min ago"
+    if mins < 1:    return "just now"
+    if mins < 60:   return f"{mins} min ago"
     if mins < 1440: return f"{mins // 60} h {mins % 60} min ago"
     return f"{mins // 1440} d ago"
 
 
 def _freshness_cls(ts) -> str:
+    """Colour for ingest/features badges (sub-hourly jobs)."""
     t = _ts(ts)
     if t is None:
         return "badge-dead"
@@ -163,8 +146,19 @@ def _freshness_cls(ts) -> str:
     return "badge-dead"
 
 
-def _badge(label: str, ts) -> str:
-    cls = _freshness_cls(ts)
+def _freshness_cls_daily(ts) -> str:
+    """Colour for forecast badge (daily job — ok if < 26 h)."""
+    t = _ts(ts)
+    if t is None:
+        return "badge-dead"
+    hours = (pd.Timestamp.now(tz="UTC") - t).total_seconds() / 3600
+    if hours < 26: return "badge-ok"
+    if hours < 30: return "badge-warn"
+    return "badge-dead"
+
+
+def _badge(label: str, ts, daily: bool = False) -> str:
+    cls = _freshness_cls_daily(ts) if daily else _freshness_cls(ts)
     return f'<span class="badge {cls}">{label}</span>'
 
 
@@ -193,11 +187,11 @@ def build_map(forecasts: pd.DataFrame) -> folium.Map:
         t  = (mw - min_mw) / rng
         folium.CircleMarker(
             location=[lat, lon],
-            radius=10 + t * 20,                 # 10 … 30 px
+            radius=10 + t * 20,
             color=MAP_COLOR,
             fill=True,
             fill_color=MAP_COLOR,
-            fill_opacity=0.30 + t * 0.55,       # 0.30 … 0.85 — opacity encodes level
+            fill_opacity=0.30 + t * 0.55,
             weight=1.5,
             tooltip=folium.Tooltip(
                 f"<b style='font-size:13px'>{region}</b>"
@@ -215,6 +209,11 @@ def build_map(forecasts: pd.DataFrame) -> folium.Map:
 
 def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str) -> go.Figure:
     now_utc = pd.Timestamp.now(tz="UTC")
+
+    # Fixed x-axis: today 00:00 → tomorrow 00:00 in Paris time
+    today_paris    = now_utc.tz_convert("Europe/Paris").normalize()
+    day_start_utc  = today_paris.tz_convert("UTC")
+    day_end_utc    = (today_paris + pd.Timedelta(days=1)).tz_convert("UTC")
 
     if region == ALL_REGIONS:
         pred_g = (
@@ -270,6 +269,7 @@ def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str
         plot_bgcolor="white",
         paper_bgcolor="white",
         xaxis=dict(
+            range=[day_start_utc, day_end_utc],
             showgrid=True, gridcolor="#E2E8F0", zeroline=False,
             showline=True, linewidth=1, linecolor="#CBD5E1",
             tickfont=dict(color="#475569", size=11),
@@ -357,32 +357,38 @@ st.markdown("""
 st.title("Electricity Demand Forecast — France")
 
 with st.spinner("Loading…"):
-    forecasts  = load_latest_forecasts()
-    actuals    = load_actuals(hours=48)
-    status     = load_system_status()
-    metrics    = load_error_metrics()
-    n_complete = load_completeness()
+    forecasts   = load_latest_forecasts()
+    actuals     = load_actuals(hours=48)
+    status      = load_system_status()
+    metrics_df  = load_metrics()
+    n_complete  = load_completeness()
 
 if forecasts.empty:
-    st.warning("No forecast data yet — run the score job first.")
+    st.warning("No forecast data yet — run the forecast job first.")
     st.stop()
 
-now_utc   = pd.Timestamp.now(tz="UTC")
-scored_at = forecasts["scored_at"].iloc[0]
-model_ver = (forecasts["model_version"].iloc[0] or "")[:8]
-n_matched = int(metrics.get("n_matched", 0) or 0)
+now_utc       = pd.Timestamp.now(tz="UTC")
+forecasted_at = forecasts["forecasted_at"].iloc[0]
+model_ver     = (forecasts["model_version"].iloc[0] or "")[:8]
 
 # France total for the next upcoming 15-min slot
 fut = forecasts[forecasts["forecast_horizon_dt"] > now_utc]
 if not fut.empty:
-    next_dt        = fut["forecast_horizon_dt"].min()
-    france_total   = fut[fut["forecast_horizon_dt"] == next_dt]["predicted_mw"].sum()
+    next_dt      = fut["forecast_horizon_dt"].min()
+    france_total = fut[fut["forecast_horizon_dt"] == next_dt]["predicted_mw"].sum()
 else:
-    france_total   = None
+    france_total = None
 
 completeness_pct = round(100 * n_complete / EXPECTED_SLOTS_24H, 1)
 
-st.caption(f"Last score: {_ago(scored_at)} · model `{model_ver}…`")
+# Pull France-level metrics from the metrics table
+france_row = metrics_df[metrics_df["region"] == "France"]
+mae_mw     = france_row["mae_mw"].iloc[0]       if not france_row.empty else None
+p95_mw     = france_row["p95_error_mw"].iloc[0] if not france_row.empty else None
+p99_mw     = france_row["p99_error_mw"].iloc[0] if not france_row.empty else None
+n_matched  = int(france_row["n_samples"].iloc[0]) if not france_row.empty else 0
+
+st.caption(f"Last forecast: {_ago(forecasted_at)} · model `{model_ver}…`")
 
 # ── KPI row ───────────────────────────────────────────────────────────────────
 
@@ -393,9 +399,9 @@ k2.metric(
     f"{completeness_pct} %",
     help=f"{n_complete:,} / {EXPECTED_SLOTS_24H:,} expected 15-min slots",
 )
-k3.metric("MAE",      _fmt_mw(metrics.get("mae_mw")), help=f"Matched pairs: {n_matched:,}")
-k4.metric("p95 error", _fmt_mw(metrics.get("p95_mw")))
-k5.metric("p99 error", _fmt_mw(metrics.get("p99_mw")))
+k3.metric("MAE (7d)",   _fmt_mw(mae_mw), help=f"Rolling 7-day, {n_matched:,} complete forecast slots")
+k4.metric("p95 error",  _fmt_mw(p95_mw))
+k5.metric("p99 error",  _fmt_mw(p99_mw))
 
 st.divider()
 
@@ -405,22 +411,26 @@ col_l, col_r = st.columns([1, 2.6])
 
 with col_l:
     st.markdown('<p class="label">Pipeline freshness</p>', unsafe_allow_html=True)
-    for name, key in [("Ingest", "last_ingest"), ("Features", "last_features"), ("Score", "last_score")]:
+    for name, key, daily in [
+        ("Ingest",   "last_ingest",   False),
+        ("Features", "last_features", False),
+        ("Forecast", "last_forecast", True),   # daily job — 26 h OK window
+    ]:
         ts = status.get(key)
         st.markdown(
             f'<div class="fr-row">'
-            f'{_badge(name, ts)}'
+            f'{_badge(name, ts, daily=daily)}'
             f'<span>{_ago(ts)}</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
 
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<p class="label">Model performance</p>', unsafe_allow_html=True)
+    st.markdown('<p class="label">Model performance (rolling 7 d)</p>', unsafe_allow_html=True)
     if n_matched == 0:
-        st.caption("No matched actuals yet — horizons haven't elapsed (24 h).")
+        st.caption("No metrics yet — run the metrics job after at least one forecast day.")
     else:
-        st.caption(f"{n_matched:,} matched prediction/actual pairs")
+        st.caption(f"{n_matched:,} complete forecast slots evaluated")
 
 with col_r:
     st.markdown('<p class="label">Predicted demand — next 24 h avg per region</p>', unsafe_allow_html=True)

@@ -10,8 +10,8 @@ param(
 )
 
 $ImageBase  = "$Region-docker.pkg.dev/$ProjectId/$Repo/elec-jobs"
-$Image      = "${ImageBase}:${Tag}"
-$DashImage  = "$Region-docker.pkg.dev/$ProjectId/$Repo/elec-dashboard:${Tag}"
+$Image      = "${ImageBase}:latest"
+$DashImage  = "$Region-docker.pkg.dev/$ProjectId/$Repo/elec-dashboard:latest"
 
 # ── Build both images via Cloud Build (no local Docker required) ──────────────
 
@@ -23,7 +23,7 @@ gcloud builds submit . `
 
 # ── Deploy Cloud Run Jobs ─────────────────────────────────────────────────────
 
-$Jobs = @("ingest", "features", "train", "score")
+$Jobs = @("ingest", "features", "train", "forecast", "metrics")
 
 foreach ($Job in $Jobs) {
     Write-Host "==> Deploying Cloud Run Job: $Job"

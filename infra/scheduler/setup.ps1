@@ -12,8 +12,9 @@ param(
 $Jobs = @(
     @{ Name = "ingest";   Schedule = "*/15 * * * *"       },  # :00 :15 :30 :45
     @{ Name = "features"; Schedule = "2,17,32,47 * * * *" },  # +2 min after ingest
-    @{ Name = "train";    Schedule = "0 2 * * 0"          },  # Sunday 2am
-    @{ Name = "score";    Schedule = "5,20,35,50 * * * *" }   # +5 min after ingest
+    @{ Name = "train";    Schedule = "0 2 * * 0"          },  # Sunday 02:00 Paris
+    @{ Name = "forecast"; Schedule = "0 6 * * *"          },  # daily 06:00 Paris
+    @{ Name = "metrics";  Schedule = "10,25,40,55 * * * *"  }  # +10 min after ingest (actuals trickle in with ~7h ODRÉ lag)
 )
 
 foreach ($Job in $Jobs) {

@@ -5,14 +5,14 @@ steps:
       - build
       - -t
       - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-jobs:${SHORT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-jobs:latest
       - -f
       - infra/cloudrun/Dockerfile.jobs
       - .
 
   - name: gcr.io/cloud-builders/docker
-    args:
-      - push
-      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-jobs:${SHORT_SHA}
+    args: [push, --all-tags, "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-jobs"]
 
   # ── Dashboard image ─────────────────────────────────────────────────────────
   - name: gcr.io/cloud-builders/docker
@@ -20,18 +20,20 @@ steps:
       - build
       - -t
       - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-dashboard:${SHORT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-dashboard:latest
       - -f
       - apps/dashboard/Dockerfile
       - .
 
   - name: gcr.io/cloud-builders/docker
-    args:
-      - push
-      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-dashboard:${SHORT_SHA}
+    args: [push, --all-tags, "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-dashboard"]
 
 images:
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-jobs:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-jobs:latest
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-dashboard:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-dashboard:latest
 
 substitutions:
   _REGION: europe-west9

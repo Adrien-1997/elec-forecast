@@ -31,7 +31,12 @@ from elec_jobs.shared.bq import get_client
 LOG = logging.getLogger(__name__)
 UTC = timezone.utc
 
+# Sorted list of region names — must match forecast/run.py REGION_CATEGORIES exactly.
+# Fixed order guarantees consistent LightGBM categorical label encoding across runs.
+REGION_CATEGORIES: list[str] = sorted(v[0] for v in config.REGION_CENTROIDS.values())
+
 FEATURE_COLS = [
+    "region",                       # categorical — LightGBM native handling
     "consommation_lag_24h",
     "consommation_lag_168h",
     "consommation_rolling_168h",
@@ -99,6 +104,9 @@ def _train(
     for col in ("is_weekend", "is_public_holiday_fr"):
         train_df[col] = train_df[col].astype(int)
         val_df[col] = val_df[col].astype(int)
+    # Fixed category list ensures consistent label encoding across train and forecast runs.
+    train_df["region"] = pd.Categorical(train_df["region"], categories=REGION_CATEGORIES)
+    val_df["region"]   = pd.Categorical(val_df["region"],   categories=REGION_CATEGORIES)
 
     X_train, y_train = train_df[FEATURE_COLS], train_df[TARGET_COL]
     X_val,   y_val   = val_df[FEATURE_COLS],   val_df[TARGET_COL]
