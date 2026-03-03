@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars and adjust if needed.
+# All defaults already match the deployed project — only override to change.
+
+project_id       = "elec-forecast"
+region           = "europe-west9"
+scheduler_region = "europe-west1"
+sa_name          = "elec-forecast-sa"

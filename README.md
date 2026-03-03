@@ -70,6 +70,7 @@ Daily:
 | ML | LightGBM + scikit-learn | Fast training, strong tabular performance |
 | Experiment tracking | MLflow self-hosted on Cloud Run | Portable, no vendor lock-in; SQLite on GCS avoids Cloud SQL cost |
 | Dashboard | Streamlit on Cloud Run | Rapid iteration, Python-native |
+| IaC | Terraform | Reproducible GCP provisioning (GCS, BQ, IAM, Scheduler, Secrets) |
 | CI/CD | Cloud Build + Artifact Registry | Native GCP, triggered via `deploy.ps1` |
 | Region | europe-west9 (Paris) | Co-located with data source |
 
@@ -161,9 +162,14 @@ elec-forecast/
 │   ├── cloudrun/
 │   │   ├── Dockerfile.jobs        # Single image for all 5 jobs
 │   │   ├── cloudbuild.yaml        # Cloud Build — builds images tagged :{SHA} + :latest
-│   │   └── deploy.ps1             # Build + deploy all Cloud Run resources
-│   ├── sql/ddl/                   # BigQuery table DDL (data contracts)
-│   └── scheduler/setup.ps1        # Cloud Scheduler jobs setup
+│   │   └── deploy.ps1             # Build + deploy all Cloud Run Jobs + dashboard
+│   ├── sql/ddl/                   # BigQuery DDL (reference; Terraform is authoritative)
+│   └── terraform/                 # All GCP resources — single source of truth
+│       ├── main.tf                # Provider + GCS backend
+│       ├── apis.tf / iam.tf / storage.tf / registry.tf
+│       ├── bigquery.tf / secrets.tf / scheduler.tf
+│       ├── imports.tf             # Import blocks for existing resources
+│       └── schemas/               # BQ table schemas as JSON
 ├── contracts/
 │   ├── schemas.md                 # Human-readable table schemas
 │   └── features.yaml              # Feature registry
@@ -198,23 +204,25 @@ Copy-Item .env.example .env
 # Fill in: GCP_PROJECT_ID, GCS_BUCKET
 ```
 
-### 3. Bootstrap GCP resources
+### 3. Provision GCP resources with Terraform
 
-Creates APIs, IAM service account, GCS bucket, Artifact Registry, BQ datasets + tables, Secret Manager secrets.
+Creates all GCP resources: APIs, IAM service account, GCS bucket, Artifact Registry, BQ datasets + tables, Secret Manager secrets, Cloud Scheduler jobs. Terraform state is stored in the project's own GCS bucket.
 
 ```powershell
 gcloud auth login
+gcloud auth application-default login
 gcloud config set project <PROJECT_ID>
-.\infra\setup.ps1
+cd infra/terraform
+terraform init
+terraform apply
 ```
 
 ### 4. Deploy to Cloud Run
 
-Builds Docker images via Cloud Build and deploys 4 Cloud Run Jobs + dashboard Service.
+Builds Docker images via Cloud Build and deploys 5 Cloud Run Jobs + dashboard Service.
 
 ```powershell
 .\infra\cloudrun\deploy.ps1
-.\infra\scheduler\setup.ps1
 ```
 
 ### 5. Run jobs locally
@@ -259,6 +267,7 @@ All jobs share a single Docker image (`Dockerfile.jobs`); the `JOB_MODULE` envir
 
 ## Roadmap
 
+- [x] Terraform for all GCP resources (GCS, BQ, IAM, Scheduler, Secrets, Artifact Registry)
 - [ ] MLflow server on Cloud Run (self-hosted experiment tracking UI)
 - [ ] GitHub → Cloud Build trigger (CI on push to main)
 - [ ] Historical backfill (eco2mix-regional-cons-def, 2013–present) + initial training run

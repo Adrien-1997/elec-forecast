@@ -1,0 +1,16 @@
+[
+  {"name": "date_heure",                "type": "TIMESTAMP", "mode": "REQUIRED"},
+  {"name": "region",                    "type": "STRING",    "mode": "REQUIRED"},
+  {"name": "consommation_lag_24h",      "type": "FLOAT64",   "mode": "NULLABLE"},
+  {"name": "consommation_lag_168h",     "type": "FLOAT64",   "mode": "NULLABLE"},
+  {"name": "consommation_rolling_168h", "type": "FLOAT64",   "mode": "NULLABLE"},
+  {"name": "temperature_celsius",       "type": "FLOAT64",   "mode": "NULLABLE"},
+  {"name": "wind_speed_kmh",            "type": "FLOAT64",   "mode": "NULLABLE"},
+  {"name": "solar_radiation_wm2",       "type": "FLOAT64",   "mode": "NULLABLE"},
+  {"name": "hour_of_day",               "type": "INT64",     "mode": "NULLABLE"},
+  {"name": "day_of_week",               "type": "INT64",     "mode": "NULLABLE", "description": "0=Mon 6=Sun"},
+  {"name": "is_weekend",                "type": "BOOL",      "mode": "NULLABLE"},
+  {"name": "is_public_holiday_fr",      "type": "BOOL",      "mode": "NULLABLE"},
+  {"name": "month",                     "type": "INT64",     "mode": "NULLABLE"},
+  {"name": "_materialized_at",          "type": "TIMESTAMP", "mode": "REQUIRED"}
+]

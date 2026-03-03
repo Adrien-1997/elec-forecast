@@ -1,0 +1,8 @@
+[
+  {"name": "forecast_horizon_dt", "type": "TIMESTAMP", "mode": "REQUIRED"},
+  {"name": "region",              "type": "STRING",    "mode": "REQUIRED"},
+  {"name": "predicted_mw",        "type": "FLOAT64",   "mode": "REQUIRED"},
+  {"name": "model_version",       "type": "STRING",    "mode": "NULLABLE"},
+  {"name": "forecast_date",       "type": "DATE",      "mode": "REQUIRED"},
+  {"name": "forecasted_at",       "type": "TIMESTAMP", "mode": "REQUIRED"}
+]

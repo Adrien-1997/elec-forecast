@@ -2,10 +2,10 @@
 
 ## Infra / GCP setup
 - [x] Create GCP project (`elec-forecast`)
-- [x] Run `.\infra\setup.ps1` — APIs, SA, bucket, Artifact Registry, BQ datasets+tables, secrets
+- [x] Bootstrap GCP resources via `setup.ps1` (now deleted — replaced by Terraform)
 - [x] Update `.env` with `GCS_BUCKET=elec-forecast-931951823998`
 - [x] Update CLAUDE.md (GCP section + Current Status)
-- [ ] **Migrate infra to Terraform** — replace `infra/setup.ps1` + `infra/scheduler/setup.ps1` with Terraform modules (GCS, BQ datasets+tables, IAM, Secret Manager, Cloud Scheduler); keep `deploy.ps1` for image build + Cloud Run deploy (Cloud Build not easily Terraformable)
+- [x] **Migrate infra to Terraform** — `infra/terraform/` covers GCS, BQ datasets+tables, IAM, Secret Manager, Cloud Scheduler, Artifact Registry, APIs; `deploy.ps1` kept for image build + Cloud Run deploy
 
 ## Data quality — ingest bug fixes
 - [x] **Overlap window** (`ingest/run.py`): use `since = MAX(date_heure) - 6h` instead of exact max — re-fetches recent slots so late-publishing regions catch up to 12/12 progressively
@@ -30,7 +30,7 @@
 ## CI/CD + deployment
 - [x] `infra/cloudrun/deploy.ps1` — build via Cloud Build + deploy 5 Jobs + dashboard (`:latest` tag)
 - [x] `infra/cloudrun/cloudbuild.yaml` — builds images tagged `:{SHA}` + `:latest`
-- [x] `infra/scheduler/setup.ps1` — 5 Cloud Scheduler jobs (ingest, features, train, forecast, metrics)
+- [x] Cloud Scheduler jobs — 5 triggers (ingest, features, train, forecast, metrics); now managed by Terraform
 - [x] Verified all 5 Cloud Run jobs execute successfully
 - [ ] Connect Cloud Build to GitHub repo (trigger on push to main)
 

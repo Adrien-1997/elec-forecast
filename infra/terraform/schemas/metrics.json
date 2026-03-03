@@ -1,0 +1,9 @@
+[
+  {"name": "computed_date",   "type": "DATE",      "mode": "REQUIRED"},
+  {"name": "region",          "type": "STRING",    "mode": "REQUIRED"},
+  {"name": "mae_mw",          "type": "FLOAT64",   "mode": "NULLABLE"},
+  {"name": "p95_error_mw",    "type": "FLOAT64",   "mode": "NULLABLE"},
+  {"name": "p99_error_mw",    "type": "FLOAT64",   "mode": "NULLABLE"},
+  {"name": "n_samples",       "type": "INT64",     "mode": "NULLABLE"},
+  {"name": "_computed_at",    "type": "TIMESTAMP", "mode": "REQUIRED"}
+]

@@ -34,10 +34,12 @@ mlflow.db
 .DS_Store
 Thumbs.db
 
-# Terraform / infra state (if added later)
+# Terraform
 *.tfstate
 *.tfstate.backup
 .terraform/
+terraform.tfvars
+tfplan
 
 # Claude Code — local AI context (not for version control)
 CLAUDE.md

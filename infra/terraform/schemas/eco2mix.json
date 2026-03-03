@@ -1,0 +1,6 @@
+[
+  {"name": "date_heure",     "type": "TIMESTAMP", "mode": "REQUIRED"},
+  {"name": "region",         "type": "STRING",    "mode": "REQUIRED"},
+  {"name": "consommation",   "type": "FLOAT64",   "mode": "NULLABLE", "description": "MW"},
+  {"name": "_ingested_at",   "type": "TIMESTAMP", "mode": "REQUIRED"}
+]
