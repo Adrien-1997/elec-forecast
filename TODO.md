@@ -18,9 +18,9 @@
 - [x] `features/run.py` — compute lags + rolling avg + calendar features → BQ `elec_features.features`
 - [x] `train/run.py` — train LightGBM (+ region as categorical), log to MLflow, upload model artifact to GCS
 - [x] `forecast/run.py` — daily job: lag features from BQ + Open-Meteo forecast weather → 96×12 predictions → UPSERT `elec_ml.predictions`
-- [x] `metrics/run.py` — daily job: predictions × actuals → MAE/p95/p99 rolling 7d → UPSERT `elec_ml.metrics`
+- [x] `metrics/run.py` — every 15 min: predictions × actuals → MAE/p95/p99 rolling 7d → UPSERT `elec_ml.metrics`
 - [x] `shared/bq.py` — `merge_to_bq` utility (used by ingest, forecast, metrics)
-- [ ] Create Cloud Run Jobs for `forecast` and `metrics` (Cloud Scheduler: forecast `0 4 * * *`, metrics `0 6 * * *` UTC); delete old `score` trigger
+- [x] Cloud Run Jobs created for `forecast` + `metrics`; `score` job + scheduler trigger deleted; metrics on `10,25,40,55 * * * *`
 
 ## Apps
 - [x] `apps/dashboard/app.py` — forecasts vs actuals per region (folium map + Plotly time series)
@@ -28,16 +28,16 @@
 - [ ] `apps/mlflow/` — deploy MLflow server on Cloud Run (SQLite ↔ GCS sync)
 
 ## CI/CD + deployment
-- [x] `infra/cloudrun/deploy.ps1` — build via Cloud Build + deploy 4 Jobs + dashboard Service
-- [x] `infra/cloudrun/cloudbuild.yaml` — build jobs + dashboard images
-- [x] `infra/scheduler/setup.ps1` — create 4 Cloud Scheduler jobs (staggered: ingest→features+2min→score+5min)
-- [x] Verified Cloud Run job logs — all 4 jobs executing successfully
+- [x] `infra/cloudrun/deploy.ps1` — build via Cloud Build + deploy 5 Jobs + dashboard (`:latest` tag)
+- [x] `infra/cloudrun/cloudbuild.yaml` — builds images tagged `:{SHA}` + `:latest`
+- [x] `infra/scheduler/setup.ps1` — 5 Cloud Scheduler jobs (ingest, features, train, forecast, metrics)
+- [x] Verified all 5 Cloud Run jobs execute successfully
 - [ ] Connect Cloud Build to GitHub repo (trigger on push to main)
 
 ## Data pipeline operations
 - [ ] **Backfill**: run ingest with `eco2mix-regional-cons-def` (historical dataset, back to 2013) to populate BQ for training
 - [ ] **Initial training run**: execute `train` job after backfill, verify MLflow run logged + model on GCS
-- [ ] Validate end-to-end pipeline: ingest → features → train → score → dashboard shows predictions
+- [x] Validate end-to-end pipeline: all 5 jobs run locally + on Cloud Run; dashboard shows predictions + freshness badges
 
 ## Monitoring & retraining
 - [ ] **Drift detection**: compute feature drift (PSI or KS test) on rolling window vs training distribution

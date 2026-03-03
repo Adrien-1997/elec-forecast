@@ -2,6 +2,11 @@ version: "1.0"
 description: "Feature registry for elec-forecast model."
 
 features:
+  - name: region
+    type: categorical
+    source_table: elec_raw.eco2mix
+    description: French metropolitan region name. Encoded as pd.Categorical with fixed sorted REGION_CATEGORIES list — must be consistent between train and forecast jobs for LightGBM label encoding stability.
+
   - name: consommation_lag_24h
     type: float
     source_table: elec_raw.eco2mix
@@ -20,7 +25,7 @@ features:
   - name: temperature_celsius
     type: float
     source_table: elec_raw.weather
-    description: Air temperature in °C at region centroid.
+    description: Air temperature in °C at region centroid. Historical weather from BQ for training; Open-Meteo forecast API at scoring time.
 
   - name: wind_speed_kmh
     type: float
@@ -35,7 +40,7 @@ features:
   - name: hour_of_day
     type: int
     source_table: derived
-    description: Hour of the 15-min slot (0–23).
+    description: Hour of the 15-min slot (0–23), computed in Europe/Paris timezone.
 
   - name: day_of_week
     type: int

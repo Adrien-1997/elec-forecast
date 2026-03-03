@@ -10,6 +10,7 @@
 
 **Source**: ODRÉ API (`eco2mix-regional-tr` / `eco2mix-regional-cons-def`)
 **Partition**: DATE(date_heure) · **Cluster**: region
+**UPSERT key**: (date_heure, region)
 
 ---
 
@@ -23,7 +24,7 @@
 | `solar_radiation_wm2` | FLOAT64 | W/m² |
 | `_ingested_at` | TIMESTAMP | Row insertion time |
 
-**Source**: Open-Meteo API (region centroids)
+**Source**: Open-Meteo API (region centroids) — historical weather only; forecast weather fetched at run time by the forecast job.
 
 ---
 
@@ -54,4 +55,27 @@
 | `region` | STRING | French metro region name |
 | `predicted_mw` | FLOAT64 | Predicted consumption in MW |
 | `model_version` | STRING | MLflow run ID |
-| `scored_at` | TIMESTAMP | When forecast was produced |
+| `forecast_date` | DATE | Calendar date the forecast was generated |
+| `forecasted_at` | TIMESTAMP | Exact timestamp of the forecast run |
+
+**Written by**: `forecast` job (daily 06:00 Paris)
+**Partition**: DATE(forecast_horizon_dt) · **Cluster**: region
+**UPSERT key**: (forecast_horizon_dt, region)
+
+---
+
+## `elec_ml.metrics`
+| Column | Type | Description |
+|---|---|---|
+| `computed_date` | DATE | Date these metrics were computed |
+| `region` | STRING | Region name or `'France'` for national aggregate |
+| `mae_mw` | FLOAT64 | Mean absolute error over rolling 7-day window |
+| `p95_error_mw` | FLOAT64 | 95th percentile of absolute error |
+| `p99_error_mw` | FLOAT64 | 99th percentile of absolute error |
+| `n_samples` | INT64 | Number of matched prediction/actual pairs |
+| `_computed_at` | TIMESTAMP | Exact timestamp of computation |
+
+**Written by**: `metrics` job (every 15 min, +10 min after ingest)
+**Partition**: computed_date · **Cluster**: region
+**UPSERT key**: (computed_date, region) — intraday runs overwrite today's snapshot
+**France row**: aggregated over complete slots only (all 12 regions present)

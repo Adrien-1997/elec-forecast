@@ -28,27 +28,35 @@ The goal is a production-grade ML system — not just a notebook — with proper
 ODRÉ API (eco2mix)  ─┐
                       ├─► [ingest]  ─► BQ elec_raw  ─► [features]  ─► BQ elec_features
 Open-Meteo API     ─┘                                                        │
-                                                                              ▼
+(historical weather)                                                          ▼
                                                                        [train] ──► GCS model artifact
                                                                               │         │
-                                                                         MLflow DB  [score]
+                                                                         MLflow DB  [forecast] ◄── Open-Meteo (live forecast)
                                                                        (SQLite/GCS)    │
                                                                                        ▼
                                                                             BQ elec_ml.predictions
+                                                                                       │
+                                                                                  [metrics]
+                                                                                       │
+                                                                                       ▼
+                                                                            BQ elec_ml.metrics
                                                                                        │
                                                                                        ▼
                                                                          Streamlit dashboard (live)
 ```
 
-**Data flow per cycle (every 15 min):**
+**Data flow:**
 
 ```
-:00/:15/:30/:45  →  ingest   — fetch new eco2mix + weather records → BQ raw
-         +2 min  →  features — materialise feature store from raw
-         +5 min  →  score    — load model from GCS, write 24h-ahead predictions → BQ
-```
+Every 15 min:
+  :00/:15/:30/:45  →  ingest   — fetch new eco2mix + weather → BQ raw
+           +2 min  →  features — materialise feature store from raw
+          +10 min  →  metrics  — rolling 7d MAE/p95/p99 → BQ elec_ml.metrics
 
-Training runs weekly (Sunday 2am) on the full feature store.
+Daily:
+  06:00 Paris  →  forecast — eco history lags + Open-Meteo live forecast → 96×12 predictions → BQ
+  02:00 Sun    →  train    — full feature store → LightGBM → MLflow + GCS
+```
 
 ---
 
@@ -89,9 +97,10 @@ Features are computed in BigQuery SQL (single round-trip) then augmented in Pyth
 
 | Feature | Description |
 |---|---|
+| `region` | French region — encoded as `pd.Categorical` with fixed sorted category list (consistent between train and forecast) |
 | `consommation_lag_24h` | Consumption same time yesterday |
 | `consommation_lag_168h` | Consumption same time last week |
-| `consommation_rolling_168h` | 7-day rolling average (RANGE window in BQ) |
+| `consommation_rolling_168h` | 7-day rolling average |
 | `temperature_celsius` | Regional temperature at nearest hour |
 | `wind_speed_kmh` | Regional wind speed at nearest hour |
 | `solar_radiation_wm2` | Direct radiation at nearest hour |
@@ -100,8 +109,6 @@ Features are computed in BigQuery SQL (single round-trip) then augmented in Pyth
 | `month` | 1–12 |
 | `is_weekend` | Boolean |
 | `is_public_holiday_fr` | Boolean (via `holidays` library) |
-
-Region is encoded as a categorical feature by LightGBM natively.
 
 ---
 
@@ -120,10 +127,10 @@ Region is encoded as a categorical feature by LightGBM natively.
 
 Live Streamlit dashboard showing:
 
-- **KPI row**: France total predicted MW (next slot), data completeness (24h), MAE, p95/p99 error vs actuals
-- **Pipeline freshness**: colour-coded badges (green < 20 min, yellow < 60 min, red otherwise) for ingest, features, score
-- **Regional map**: folium map of France with circle markers — size and opacity encode predicted demand per region
-- **Time series**: realized vs predicted consumption, selectable per region or France total, 48h history + 24h forecast with overlap zone where past predictions meet actuals
+- **KPI row**: France total predicted MW (next slot), data completeness (24h), rolling 7d MAE, p95/p99 error from `elec_ml.metrics`
+- **Pipeline freshness**: colour-coded badges for ingest/features (20/60 min thresholds) and forecast (26 h threshold for daily job)
+- **Regional map**: folium map of France — circle size and opacity encode predicted demand per region
+- **Time series**: fixed 24h day view (Paris midnight → midnight), actuals fill from left, "now" line moves through day, predictions extend to right; selectable per region or France total
 
 ---
 
@@ -136,10 +143,11 @@ elec-forecast/
 │   │   ├── ingest/run.py          # eco2mix + weather → BQ raw
 │   │   ├── features/run.py        # raw → feature store (BQ SQL + Python)
 │   │   ├── train/run.py           # features → LightGBM + MLflow + GCS
-│   │   ├── score/run.py           # model + features → 24h predictions
+│   │   ├── forecast/run.py        # daily: eco lags + Open-Meteo live → 96×12 predictions → BQ
+│   │   ├── metrics/run.py         # rolling 7d MAE/p95/p99 → BQ elec_ml.metrics
 │   │   ├── shared/
 │   │   │   ├── config.py          # env-based config + region centroids
-│   │   │   ├── bq.py              # BQ client + load helpers
+│   │   │   ├── bq.py              # BQ client + merge_to_bq (UPSERT helper)
 │   │   │   └── gcs.py             # GCS upload/download helpers
 │   │   └── __main__.py            # Docker entrypoint (JOB_MODULE env var)
 │   └── pyproject.toml
@@ -151,8 +159,8 @@ elec-forecast/
 │   └── mlflow/                    # Self-hosted MLflow server (WIP)
 ├── infra/
 │   ├── cloudrun/
-│   │   ├── Dockerfile.jobs        # Single image for all 4 jobs
-│   │   ├── cloudbuild.yaml        # Cloud Build — builds jobs + dashboard images
+│   │   ├── Dockerfile.jobs        # Single image for all 5 jobs
+│   │   ├── cloudbuild.yaml        # Cloud Build — builds images tagged :{SHA} + :latest
 │   │   └── deploy.ps1             # Build + deploy all Cloud Run resources
 │   ├── sql/ddl/                   # BigQuery table DDL (data contracts)
 │   └── scheduler/setup.ps1        # Cloud Scheduler jobs setup
@@ -213,7 +221,7 @@ Builds Docker images via Cloud Build and deploys 4 Cloud Run Jobs + dashboard Se
 
 ```powershell
 # Activate venv and set env vars
-$env:JOB_MODULE = "ingest"   # or features / train / score
+$env:JOB_MODULE = "ingest"   # or features / train / forecast / metrics
 python -m elec_jobs
 ```
 
@@ -221,16 +229,17 @@ python -m elec_jobs
 
 ## Jobs
 
-| Job | Schedule | Description |
+| Job | Schedule (Paris) | Description |
 |---|---|---|
-| `ingest` | `*/15 * * * *` | Pull new eco2mix records + weather → BQ raw tables |
+| `ingest` | `*/15 * * * *` | Pull new eco2mix records + weather → BQ raw (UPSERT) |
 | `features` | `2,17,32,47 * * * *` | Compute lags, rolling avg, calendar features → BQ feature store |
 | `train` | `0 2 * * 0` (Sun 2am) | Train LightGBM on full feature store, log to MLflow, push model to GCS |
-| `score` | `5,20,35,50 * * * *` | Load latest model from GCS, generate 96-slot 24h forecast → BQ predictions |
+| `forecast` | `0 6 * * *` (daily 6am) | Eco history lags + Open-Meteo live forecast → 96×12 predictions → UPSERT `elec_ml.predictions` |
+| `metrics` | `10,25,40,55 * * * *` | predictions × actuals → rolling 7d MAE/p95/p99 → UPSERT `elec_ml.metrics` |
 
 Schedules are staggered so each job waits for upstream data before running.
 
-All jobs share a single Docker image (`Dockerfile.jobs`); the `JOB_MODULE` environment variable selects the entry point.
+All jobs share a single Docker image (`Dockerfile.jobs`); the `JOB_MODULE` environment variable selects the entry point. Images are tagged both `:{git-sha}` (audit trail) and `:latest` (stable reference for Cloud Run).
 
 ---
 
