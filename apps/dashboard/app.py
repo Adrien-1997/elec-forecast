@@ -422,7 +422,7 @@ n_matched = int(france_row["n_samples"].iloc[0]) if not france_row.empty else 0
 col_title, col_status = st.columns([3, 2])
 
 with col_title:
-    st.markdown("## ⚡ Electricity Demand Forecast — France")
+    st.markdown("## ⚡ Electricity Demand Forecast France")
     st.caption(f"Model `{model_ver}…` · Forecasted {_ago(forecasted_at)}")
 
 with col_status:
@@ -447,7 +447,7 @@ st.divider()
 # ─────────────────────────────────────────────────────────────────────────────
 
 k1, k2, k3, k4 = st.columns(4)
-k1.metric("France total (now)", _fmt_mw(france_total))
+k1.metric("France total · next 15 min (predicted)", _fmt_mw(france_total))
 k2.metric(
     "MAE — 7d rolling", _fmt_mw(mae_mw),
     help=f"{n_matched:,} complete forecast slots evaluated",
