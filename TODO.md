@@ -10,7 +10,6 @@
 ## Data quality — ingest bug fixes
 - [x] **Overlap window** (`ingest/run.py`): use `since = MAX(date_heure) - 6h` instead of exact max — re-fetches recent slots so late-publishing regions catch up to 12/12 progressively
 - [x] **Upsert on ingest** (`ingest/run.py`): replace `_append_to_bq` with `_merge_to_bq` (BQ MERGE on `date_heure, region`) to avoid duplicates from the re-fetch overlap
-- [ ] **Deploy + one-time 48h backfill**: rebuild jobs image, redeploy ingest, run manually with `DEFAULT_LOOKBACK_DAYS=2` to retroactively fill incomplete slots already in BQ
 
 ## Jobs — implementation
 - [x] `ingest/run.py` — pull eco2mix (ODRÉ API, paginated) → BQ `elec_raw.eco2mix`

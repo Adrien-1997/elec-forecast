@@ -447,7 +447,7 @@ st.divider()
 # ─────────────────────────────────────────────────────────────────────────────
 
 k1, k2, k3, k4 = st.columns(4)
-k1.metric("France total (next slot)", _fmt_mw(france_total))
+k1.metric("France total (now)", _fmt_mw(france_total))
 k2.metric(
     "MAE — 7d rolling", _fmt_mw(mae_mw),
     help=f"{n_matched:,} complete forecast slots evaluated",
