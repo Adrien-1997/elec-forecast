@@ -31,7 +31,7 @@ REGION_CENTROIDS: dict[str, tuple[float, float]] = {
 
 EXPECTED_SLOTS_24H = 96 * 12   # 15-min slots × 12 regions
 ALL_REGIONS        = "All regions"
-MAP_COLOR          = "#2563EB"  # single indigo-blue
+MAP_COLOR          = "#2563EB"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -45,11 +45,6 @@ def _bq() -> bigquery.Client:
 
 @st.cache_data(ttl=300)
 def load_latest_forecasts() -> pd.DataFrame:
-    """Load predictions for the past 48h + next 24h window.
-
-    One row per (forecast_horizon_dt, region) — no dedup needed since
-    the forecast job USERTs on that key.
-    """
     sql = f"""
     SELECT forecast_horizon_dt, region, predicted_mw, model_version, forecasted_at
     FROM `{PROJECT}.elec_ml.predictions`
@@ -85,7 +80,6 @@ def load_system_status() -> dict:
 
 @st.cache_data(ttl=300)
 def load_metrics() -> pd.DataFrame:
-    """Latest computed metrics for all regions + France total."""
     sql = f"""
     SELECT region, mae_mw, p95_error_mw, p99_error_mw, n_samples, computed_date
     FROM `{PROJECT}.elec_ml.metrics`
@@ -97,7 +91,6 @@ def load_metrics() -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def load_completeness() -> int:
-    """Count of distinct (date_heure, region) slots in eco2mix for last 24 h."""
     sql = f"""
     SELECT COUNT(*) AS n
     FROM (
@@ -136,7 +129,6 @@ def _ago(ts) -> str:
 
 
 def _freshness_cls(ts) -> str:
-    """Colour for ingest/features badges (sub-hourly jobs)."""
     t = _ts(ts)
     if t is None:
         return "badge-dead"
@@ -147,7 +139,6 @@ def _freshness_cls(ts) -> str:
 
 
 def _freshness_cls_daily(ts) -> str:
-    """Colour for forecast badge (daily job — ok if < 26 h)."""
     t = _ts(ts)
     if t is None:
         return "badge-dead"
@@ -210,10 +201,9 @@ def build_map(forecasts: pd.DataFrame) -> folium.Map:
 def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str) -> go.Figure:
     now_utc = pd.Timestamp.now(tz="UTC")
 
-    # Fixed x-axis: today 00:00 → tomorrow 00:00 in Paris time
-    today_paris    = now_utc.tz_convert("Europe/Paris").normalize()
-    day_start_utc  = today_paris.tz_convert("UTC")
-    day_end_utc    = (today_paris + pd.Timedelta(days=1)).tz_convert("UTC")
+    today_paris   = now_utc.tz_convert("Europe/Paris").normalize()
+    day_start_utc = today_paris.tz_convert("UTC")
+    day_end_utc   = (today_paris + pd.Timedelta(days=1)).tz_convert("UTC")
 
     if region == ALL_REGIONS:
         pred_g = (
@@ -224,30 +214,26 @@ def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str
             actuals.groupby("date_heure")["consommation"]
             .sum().reset_index().sort_values("date_heure")
         )
-        px, py = pred_g["forecast_horizon_dt"], pred_g["predicted_mw"]
-        ax, ay = act_g["date_heure"],           act_g["consommation"]
-        title  = "France total — Realized vs Predicted"
+        px, py  = pred_g["forecast_horizon_dt"], pred_g["predicted_mw"]
+        ax, ay  = act_g["date_heure"],           act_g["consommation"]
+        title   = "France total — Realized vs Predicted"
         y_label = "Total consumption (MW)"
     else:
         pred_r = forecasts[forecasts["region"] == region].sort_values("forecast_horizon_dt")
         act_r  = actuals[actuals["region"] == region].sort_values("date_heure")
-        px, py = pred_r["forecast_horizon_dt"], pred_r["predicted_mw"]
-        ax, ay = act_r["date_heure"],           act_r["consommation"]
-        title  = f"{region} — Realized vs Predicted"
+        px, py  = pred_r["forecast_horizon_dt"], pred_r["predicted_mw"]
+        ax, ay  = act_r["date_heure"],           act_r["consommation"]
+        title   = f"{region} — Realized vs Predicted"
         y_label = "Consumption (MW)"
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=ax, y=ay,
-        name="Actual",
-        line=dict(color="#1E3A5F", width=2),
-        mode="lines",
+        x=ax, y=ay, name="Actual",
+        line=dict(color="#1E3A5F", width=2), mode="lines",
     ))
     fig.add_trace(go.Scatter(
-        x=px, y=py,
-        name="Predicted",
-        line=dict(color=MAP_COLOR, width=2, dash="dash"),
-        mode="lines",
+        x=px, y=py, name="Predicted",
+        line=dict(color=MAP_COLOR, width=2, dash="dash"), mode="lines",
     ))
     fig.update_layout(
         shapes=[{
@@ -261,8 +247,6 @@ def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str
             "font": {"color": "#94A3B8", "size": 11},
             "xanchor": "left", "yanchor": "top",
         }],
-    )
-    fig.update_layout(
         title=dict(text=title, font=dict(size=14, color="#0F172A")),
         yaxis_title=y_label,
         xaxis_title=None,
@@ -294,14 +278,14 @@ def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Page
+# Page config + CSS
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.set_page_config(page_title="Elec Forecast", layout="wide")
+st.set_page_config(page_title="Elec Forecast", layout="wide", page_icon="⚡")
 
 st.markdown("""
 <style>
-/* metric cards */
+/* ── Metric cards ─────────────────────────────────────────────────────── */
 [data-testid="stMetric"] {
     background: #F8FAFC;
     border: 1px solid #E2E8F0;
@@ -320,10 +304,10 @@ st.markdown("""
     font-weight: 700 !important;
     color: #0F172A !important;
 }
-/* freshness badges */
+/* ── Freshness badges ─────────────────────────────────────────────────── */
 .badge {
     display: inline-block;
-    padding: 2px 9px;
+    padding: 3px 10px;
     border-radius: 999px;
     font-size: 11px;
     font-weight: 700;
@@ -333,35 +317,81 @@ st.markdown("""
 .badge-ok   { background: #DCFCE7; color: #166534; }
 .badge-warn { background: #FEF9C3; color: #854D0E; }
 .badge-dead { background: #FEE2E2; color: #991B1B; }
-/* section labels */
-.label {
+/* ── Pipeline status bar ──────────────────────────────────────────────── */
+.status-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: #64748B;
+}
+.status-sep { color: #CBD5E1; }
+/* ── Section labels ───────────────────────────────────────────────────── */
+.section-label {
     font-size: 11px;
     color: #94A3B8;
     text-transform: uppercase;
     letter-spacing: .08em;
     font-weight: 700;
-    margin: 0 0 6px 0;
+    margin: 0 0 10px 0;
 }
-/* freshness rows */
-.fr-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
-    font-size: 14px;
-    color: #334155;
+/* ── Chart card ───────────────────────────────────────────────────────── */
+[data-testid="stPlotlyChart"] {
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 12px 12px 2px;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(15,23,42,.05);
+    overflow: hidden;
+}
+/* ── Chart+map row: equal height columns ──────────────────────────────── */
+[data-testid="stHorizontalBlock"]:has([data-testid="stVerticalBlockBorderWrapper"]) {
+    align-items: stretch;
+}
+[data-testid="stHorizontalBlock"]:has([data-testid="stVerticalBlockBorderWrapper"])
+    > [data-testid="stColumn"] > [data-testid="stVerticalBlock"] {
+    height: 100%;
+}
+/* ── Map card (st.container border=True) ──────────────────────────────── */
+[data-testid="stVerticalBlockBorderWrapper"] {
+    border: 1px solid #E2E8F0 !important;
+    border-radius: 12px !important;
+    box-shadow: 0 1px 4px rgba(15,23,42,.05) !important;
+    background: #fff !important;
+    padding: 14px 14px 10px !important;
+    height: 100% !important;
+    box-sizing: border-box !important;
+}
+/* ── Region selector — compact pill above chart ───────────────────────── */
+.region-selector [data-testid="stSelectbox"] > div > div {
+    border-radius: 20px;
+    border-color: #E2E8F0;
+    font-size: 13px;
+    min-height: 34px;
+    padding: 0 12px;
+    background: #F8FAFC;
 }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("Electricity Demand Forecast — France")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Load data
+# ─────────────────────────────────────────────────────────────────────────────
 
 with st.spinner("Loading…"):
-    forecasts   = load_latest_forecasts()
-    actuals     = load_actuals(hours=48)
-    status      = load_system_status()
-    metrics_df  = load_metrics()
-    n_complete  = load_completeness()
+    forecasts  = load_latest_forecasts()
+    actuals    = load_actuals(hours=48)
+    status     = load_system_status()
+    metrics_df = load_metrics()
+    n_complete = load_completeness()
+
+# Keep only timestamps where all 12 regions have reported.
+# Partial timestamps (API lag) produce artificially low sums — drop them.
+_N_REGIONS = len(REGION_CENTROIDS)
+_complete_ts = actuals.groupby("date_heure")["region"].nunique()
+actuals = actuals[actuals["date_heure"].isin(_complete_ts[_complete_ts == _N_REGIONS].index)]
 
 if forecasts.empty:
     st.warning("No forecast data yet — run the forecast job first.")
@@ -371,78 +401,85 @@ now_utc       = pd.Timestamp.now(tz="UTC")
 forecasted_at = forecasts["forecasted_at"].iloc[0]
 model_ver     = (forecasts["model_version"].iloc[0] or "")[:8]
 
-# France total for the next upcoming 15-min slot
 fut = forecasts[forecasts["forecast_horizon_dt"] > now_utc]
-if not fut.empty:
-    next_dt      = fut["forecast_horizon_dt"].min()
-    france_total = fut[fut["forecast_horizon_dt"] == next_dt]["predicted_mw"].sum()
-else:
-    france_total = None
+france_total = (
+    fut[fut["forecast_horizon_dt"] == fut["forecast_horizon_dt"].min()]["predicted_mw"].sum()
+    if not fut.empty else None
+)
 
 completeness_pct = round(100 * n_complete / EXPECTED_SLOTS_24H, 1)
 
-# Pull France-level metrics from the metrics table
 france_row = metrics_df[metrics_df["region"] == "France"]
-mae_mw     = france_row["mae_mw"].iloc[0]       if not france_row.empty else None
-p95_mw     = france_row["p95_error_mw"].iloc[0] if not france_row.empty else None
-p99_mw     = france_row["p99_error_mw"].iloc[0] if not france_row.empty else None
-n_matched  = int(france_row["n_samples"].iloc[0]) if not france_row.empty else 0
+mae_mw    = france_row["mae_mw"].iloc[0]       if not france_row.empty else None
+p95_mw    = france_row["p95_error_mw"].iloc[0] if not france_row.empty else None
+n_matched = int(france_row["n_samples"].iloc[0]) if not france_row.empty else 0
 
-st.caption(f"Last forecast: {_ago(forecasted_at)} · model `{model_ver}…`")
 
-# ── KPI row ───────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Header — title + pipeline status
+# ─────────────────────────────────────────────────────────────────────────────
 
-k1, k2, k3, k4, k5 = st.columns(5)
+col_title, col_status = st.columns([3, 2])
+
+with col_title:
+    st.markdown("## ⚡ Electricity Demand Forecast — France")
+    st.caption(f"Model `{model_ver}…` · Forecasted {_ago(forecasted_at)}")
+
+with col_status:
+    ingest_ts   = status.get("last_ingest")
+    features_ts = status.get("last_features")
+    forecast_ts = status.get("last_forecast")
+    st.markdown(
+        f'<div class="status-bar" style="justify-content:flex-end; padding-top:14px">'
+        f'{_badge("Ingest", ingest_ts)} <span>{_ago(ingest_ts)}</span>'
+        f' <span class="status-sep">·</span>'
+        f' {_badge("Features", features_ts)} <span>{_ago(features_ts)}</span>'
+        f' <span class="status-sep">·</span>'
+        f' {_badge("Forecast", forecast_ts, daily=True)} <span>{_ago(forecast_ts)}</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+st.divider()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# KPI strip
+# ─────────────────────────────────────────────────────────────────────────────
+
+k1, k2, k3, k4 = st.columns(4)
 k1.metric("France total (next slot)", _fmt_mw(france_total))
 k2.metric(
-    "Completeness (24 h)",
-    f"{completeness_pct} %",
+    "MAE — 7d rolling", _fmt_mw(mae_mw),
+    help=f"{n_matched:,} complete forecast slots evaluated",
+)
+k3.metric("p95 error", _fmt_mw(p95_mw))
+k4.metric(
+    "Data completeness (24 h)", f"{completeness_pct} %",
     help=f"{n_complete:,} / {EXPECTED_SLOTS_24H:,} expected 15-min slots",
 )
-k3.metric("MAE (7d)",   _fmt_mw(mae_mw), help=f"Rolling 7-day, {n_matched:,} complete forecast slots")
-k4.metric("p95 error",  _fmt_mw(p95_mw))
-k5.metric("p99 error",  _fmt_mw(p99_mw))
 
-st.divider()
+st.markdown("<br>", unsafe_allow_html=True)
 
-# ── Freshness | Map ───────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Chart | Map
+# ─────────────────────────────────────────────────────────────────────────────
 
-col_l, col_r = st.columns([1, 2.6])
+col_chart, col_map = st.columns([1.6, 1])
 
-with col_l:
-    st.markdown('<p class="label">Pipeline freshness</p>', unsafe_allow_html=True)
-    for name, key, daily in [
-        ("Ingest",   "last_ingest",   False),
-        ("Features", "last_features", False),
-        ("Forecast", "last_forecast", True),   # daily job — 26 h OK window
-    ]:
-        ts = status.get(key)
-        st.markdown(
-            f'<div class="fr-row">'
-            f'{_badge(name, ts, daily=daily)}'
-            f'<span>{_ago(ts)}</span>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+with col_chart:
+    # Label + region selector inline
+    lbl_col, sel_col = st.columns([2, 1.2])
+    with lbl_col:
+        st.markdown('<p class="section-label">Realized vs Predicted</p>', unsafe_allow_html=True)
+    with sel_col:
+        regions    = [ALL_REGIONS] + sorted(forecasts["region"].unique().tolist())
+        st.markdown('<div class="region-selector">', unsafe_allow_html=True)
+        sel_region = st.selectbox("Region", options=regions, index=0, label_visibility="collapsed")
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.plotly_chart(build_timeseries(forecasts, actuals, sel_region), use_container_width=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<p class="label">Model performance (rolling 7 d)</p>', unsafe_allow_html=True)
-    if n_matched == 0:
-        st.caption("No metrics yet — run the metrics job after at least one forecast day.")
-    else:
-        st.caption(f"{n_matched:,} complete forecast slots evaluated")
-
-with col_r:
-    st.markdown('<p class="label">Predicted demand — next 24 h avg per region</p>', unsafe_allow_html=True)
-    st_folium(build_map(forecasts), width=None, height=220, returned_objects=[])
-    st.caption("Circle size and opacity scale with predicted demand.")
-
-st.divider()
-
-# ── Time series ───────────────────────────────────────────────────────────────
-
-st.markdown('<p class="label">Realized vs Predicted</p>', unsafe_allow_html=True)
-
-regions    = [ALL_REGIONS] + sorted(forecasts["region"].unique().tolist())
-sel_region = st.selectbox("Region", options=regions, index=0, label_visibility="collapsed")
-st.plotly_chart(build_timeseries(forecasts, actuals, sel_region), use_container_width=True)
+with col_map:
+    with st.container(border=True):
+        st.markdown('<p class="section-label">Predicted demand · avg next 24 h</p>', unsafe_allow_html=True)
+        st_folium(build_map(forecasts), width=None, height=306, returned_objects=[])
+        st.caption("Circle size and opacity → relative predicted demand.")

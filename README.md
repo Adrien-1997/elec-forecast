@@ -50,12 +50,17 @@ Open-Meteo API     ─┘                                                       
 ```
 Every 15 min:
   :00/:15/:30/:45  →  ingest   — fetch new eco2mix + weather → BQ raw
-           +2 min  →  features — materialise feature store from raw
           +10 min  →  metrics  — rolling 7d MAE/p95/p99 → BQ elec_ml.metrics
+
+Weekly (Sunday):
+  01:50 Sun  →  features — materialise feature store from raw (only train reads it)
+  02:00 Sun  →  train    — full feature store → LightGBM → MLflow + GCS
 
 Daily:
   06:00 Paris  →  forecast — eco history lags + Open-Meteo live forecast → 96×12 predictions → BQ
-  02:00 Sun    →  train    — full feature store → LightGBM → MLflow + GCS
+
+On-demand:
+  backfill  →  historical eco2mix + weather → BQ raw (run before first train or after data reset)
 ```
 
 ---
@@ -142,10 +147,11 @@ elec-forecast/
 ├── jobs/
 │   ├── elec_jobs/
 │   │   ├── ingest/run.py          # eco2mix + weather → BQ raw
-│   │   ├── features/run.py        # raw → feature store (BQ SQL + Python)
+│   │   ├── features/run.py        # raw → feature store (BQ SQL + Python); FEATURES_SINCE for reset
 │   │   ├── train/run.py           # features → LightGBM + MLflow + GCS
 │   │   ├── forecast/run.py        # daily: eco lags + Open-Meteo live → 96×12 predictions → BQ
 │   │   ├── metrics/run.py         # rolling 7d MAE/p95/p99 → BQ elec_ml.metrics
+│   │   ├── backfill/run.py        # historical eco2mix + weather → BQ raw (manual, no trigger)
 │   │   ├── shared/
 │   │   │   ├── config.py          # env-based config + region centroids
 │   │   │   ├── bq.py              # BQ client + merge_to_bq (UPSERT helper)
@@ -160,7 +166,7 @@ elec-forecast/
 │   └── mlflow/                    # Self-hosted MLflow server (WIP)
 ├── infra/
 │   ├── cloudrun/
-│   │   ├── Dockerfile.jobs        # Single image for all 5 jobs
+│   │   ├── Dockerfile.jobs        # Single image for all 6 jobs
 │   │   ├── cloudbuild.yaml        # Cloud Build — builds images tagged :{SHA} + :latest
 │   │   └── deploy.ps1             # Build + deploy all Cloud Run Jobs + dashboard
 │   ├── sql/ddl/                   # BigQuery DDL (reference; Terraform is authoritative)
@@ -217,19 +223,29 @@ terraform init
 terraform apply
 ```
 
-### 4. Deploy to Cloud Run
+### 4. Backfill historical data
 
-Builds Docker images via Cloud Build and deploys 5 Cloud Run Jobs + dashboard Service.
+Populates BQ raw tables with 2 years of eco2mix + weather before the first training run:
+
+```powershell
+.\scripts\full_pipeline.ps1   # truncate → backfill → features → train → forecast
+```
+
+Or run steps individually — see `scripts/full_pipeline.ps1` for env vars.
+
+### 5. Deploy to Cloud Run
+
+Builds Docker images via Cloud Build and deploys 6 Cloud Run Jobs + dashboard Service.
 
 ```powershell
 .\infra\cloudrun\deploy.ps1
 ```
 
-### 5. Run jobs locally
+### 6. Run jobs locally
 
 ```powershell
 # Activate venv and set env vars
-$env:JOB_MODULE = "ingest"   # or features / train / forecast / metrics
+$env:JOB_MODULE = "ingest"   # or features / train / forecast / metrics / backfill
 python -m elec_jobs
 ```
 
@@ -240,12 +256,13 @@ python -m elec_jobs
 | Job | Schedule (Paris) | Description |
 |---|---|---|
 | `ingest` | `*/15 * * * *` | Pull new eco2mix records + weather → BQ raw (UPSERT) |
-| `features` | `2,17,32,47 * * * *` | Compute lags, rolling avg, calendar features → BQ feature store |
-| `train` | `0 2 * * 0` (Sun 2am) | Train LightGBM on full feature store, log to MLflow, push model to GCS |
-| `forecast` | `0 6 * * *` (daily 6am) | Eco history lags + Open-Meteo live forecast → 96×12 predictions → UPSERT `elec_ml.predictions` |
+| `features` | `50 1 * * 0` (Sun 01:50) | Compute lags, rolling avg, calendar features → BQ feature store |
+| `train` | `0 2 * * 0` (Sun 02:00) | Train LightGBM on full feature store, log to MLflow, push model to GCS |
+| `forecast` | `0 6 * * *` (daily 06:00) | Eco history lags + Open-Meteo live forecast → 96×12 predictions → UPSERT `elec_ml.predictions` |
 | `metrics` | `10,25,40,55 * * * *` | predictions × actuals → rolling 7d MAE/p95/p99 → UPSERT `elec_ml.metrics` |
+| `backfill` | Manual only | Historical eco2mix + weather → BQ raw; use before first train or after a data reset |
 
-Schedules are staggered so each job waits for upstream data before running.
+Features run weekly (not every 15 min) because only the train job reads the feature store.
 
 All jobs share a single Docker image (`Dockerfile.jobs`); the `JOB_MODULE` environment variable selects the entry point. Images are tagged both `:{git-sha}` (audit trail) and `:latest` (stable reference for Cloud Run).
 
@@ -268,9 +285,12 @@ All jobs share a single Docker image (`Dockerfile.jobs`); the `JOB_MODULE` envir
 ## Roadmap
 
 - [x] Terraform for all GCP resources (GCS, BQ, IAM, Scheduler, Secrets, Artifact Registry)
+- [x] Dashboard redesign — unified Plotly + Folium layout, completeness filter, freshness badges
+- [x] Forecast fixes — lag_48h fallback for API lag, rolling window leak fixed
+- [x] Backfill pipeline — `backfill` job + `scripts/full_pipeline.ps1` for full data reset
+- [x] Initial training run — model trained on 2024-01-01 → today, live forecasts on dashboard
 - [ ] MLflow server on Cloud Run (self-hosted experiment tracking UI)
 - [ ] GitHub → Cloud Build trigger (CI on push to main)
-- [ ] Historical backfill (eco2mix-regional-cons-def, 2013–present) + initial training run
 - [ ] Drift monitoring: PSI/KS test on feature distributions, rolling MAE vs baseline
 - [ ] Automated retrain policy: trigger when 7-day MAE exceeds threshold
 - [ ] Data retention: BQ partition expiry (raw 90d, features 30d) + GCS model rotation (keep last 3)

@@ -1,7 +1,7 @@
 locals {
   scheduler_jobs = {
     ingest   = { schedule = "*/15 * * * *" }
-    features = { schedule = "2,17,32,47 * * * *" }
+    features = { schedule = "50 1 * * 0" }   # Sun 01:50 Paris — 10 min before train
     train    = { schedule = "0 2 * * 0" }
     forecast = { schedule = "0 6 * * *" }
     metrics  = { schedule = "10,25,40,55 * * * *" }

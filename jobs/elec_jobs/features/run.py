@@ -13,6 +13,7 @@ Strategy:
 """
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 
 import holidays
@@ -89,12 +90,14 @@ windowed AS (
 
         -- 7-day rolling average.  BQ RANGE windows require a numeric ORDER BY key,
         -- so we order by UNIX_SECONDS and use 604800 (= 7 * 86400 s) as the boundary.
+        -- 900 PRECEDING = 15 min: excludes the current row so the target value
+        -- does not leak into its own feature.
         -- Window spans the full `eco` CTE (history rows included) before the outer
         -- WHERE filters to date_heure > since, so the first output batch is fully populated.
         AVG(e.consommation) OVER (
             PARTITION BY e.region
             ORDER BY UNIX_SECONDS(e.date_heure)
-            RANGE BETWEEN 604800 PRECEDING AND CURRENT ROW
+            RANGE BETWEEN 604800 PRECEDING AND 900 PRECEDING
         )                                                                             AS consommation_rolling_168h,
 
         -- Weather (may be NULL if weather ingest is behind eco2mix).
@@ -143,8 +146,12 @@ def main() -> None:
     now = datetime.now(UTC)
 
     features_table = f"{config.BQ_DATASET_FEATURES}.features"
-    max_dt = _bq_max_date_heure(client, features_table)
-    since = max_dt if max_dt else now - timedelta(days=LOOKBACK_DAYS)
+    since_env = os.getenv("FEATURES_SINCE")
+    if since_env:
+        since = datetime.fromisoformat(since_env).replace(tzinfo=UTC)
+    else:
+        max_dt = _bq_max_date_heure(client, features_table)
+        since = max_dt if max_dt else now - timedelta(days=LOOKBACK_DAYS)
     LOG.info("features: computing since %s", since.isoformat())
 
     sql = _build_features_sql(config.GCP_PROJECT_ID, since)

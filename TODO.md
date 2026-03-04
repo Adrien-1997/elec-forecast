@@ -28,16 +28,17 @@
 - [ ] `apps/mlflow/` — deploy MLflow server on Cloud Run (SQLite ↔ GCS sync)
 
 ## CI/CD + deployment
-- [x] `infra/cloudrun/deploy.ps1` — build via Cloud Build + deploy 5 Jobs + dashboard (`:latest` tag)
+- [x] `infra/cloudrun/deploy.ps1` — build via Cloud Build + deploy 6 Jobs + dashboard (`:latest` tag)
 - [x] `infra/cloudrun/cloudbuild.yaml` — builds images tagged `:{SHA}` + `:latest`
-- [x] Cloud Scheduler jobs — 5 triggers (ingest, features, train, forecast, metrics); now managed by Terraform
-- [x] Verified all 5 Cloud Run jobs execute successfully
+- [x] Cloud Scheduler jobs — features schedule changed to weekly (Sun 01:50); now managed by Terraform
+- [x] Verified all 6 Cloud Run jobs execute successfully (incl. backfill)
+- [ ] Redeploy containers + apply Terraform: `.\infra\cloudrun\deploy.ps1` then `terraform apply`
 - [ ] Connect Cloud Build to GitHub repo (trigger on push to main)
 
 ## Data pipeline operations
-- [ ] **Backfill**: run ingest with `eco2mix-regional-cons-def` (historical dataset, back to 2013) to populate BQ for training
-- [ ] **Initial training run**: execute `train` job after backfill, verify MLflow run logged + model on GCS
-- [x] Validate end-to-end pipeline: all 5 jobs run locally + on Cloud Run; dashboard shows predictions + freshness badges
+- [x] **Backfill**: `backfill/run.py` job — eco2mix-regional-cons-def (2024) + eco2mix-regional-tr (2025+); `scripts/full_pipeline.ps1` orchestrates full reset
+- [x] **Initial training run**: model trained on 2024-01-01 → today; MLflow run logged locally; model artifact on GCS
+- [x] Validate end-to-end pipeline: all 6 jobs run locally + on Cloud Run; dashboard shows predictions + freshness badges
 
 ## Monitoring & retraining
 - [ ] **Drift detection**: compute feature drift (PSI or KS test) on rolling window vs training distribution

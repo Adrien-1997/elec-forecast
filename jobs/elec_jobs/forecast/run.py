@@ -108,7 +108,14 @@ def _build_lag_features(
     """Compute lag_24h, lag_168h, rolling_168h for every (slot, region) pair.
 
     Uses pandas index lookups — O(steps × regions × log N_eco).
-    rolling_168h = mean of eco[slot-168h : slot] for the region.
+    rolling_168h = mean of eco[slot-168h : slot-15min], matching the training
+    window (excludes current row, consistent with RANGE … AND 900 PRECEDING in SQL).
+
+    lag_24h fallback: the last ~7h of the 96-slot window reference eco timestamps
+    that fall within the API lag window (~7h) and are absent from BQ.  When
+    lag_24h is unavailable, lag_48h (same time two days ago) is used instead —
+    a much better substitute than letting LightGBM handle NaN via its default
+    missing-value branch, which was never seen during training.
     """
     eco_by_region: dict[str, pd.Series] = {}
     for region in regions:
@@ -120,30 +127,41 @@ def _build_lag_features(
         eco_by_region[region] = r
 
     rows = []
+    n_fallback = 0
     for slot in slots:
         lag24_ts  = slot - pd.Timedelta(hours=24)
+        lag48_ts  = slot - pd.Timedelta(hours=48)   # fallback when lag_24h unavailable
         lag168_ts = slot - pd.Timedelta(hours=168)
+        roll_end  = slot - pd.Timedelta(minutes=15) # exclude current slot (matches training SQL)
 
         for region in regions:
             r = eco_by_region.get(region, pd.Series(dtype=float))
 
             lag24  = float(r.loc[lag24_ts])  if lag24_ts  in r.index else None
+            lag48  = float(r.loc[lag48_ts])  if lag48_ts  in r.index else None
             lag168 = float(r.loc[lag168_ts]) if lag168_ts in r.index else None
+
+            # Fall back to lag_48h when lag_24h is missing due to the ~7h API lag.
+            if lag24 is None and lag48 is not None:
+                lag24 = lag48
+                n_fallback += 1
 
             if r.empty:
                 rolling = None
             else:
-                window  = r.loc[lag168_ts:slot]
+                window  = r.loc[lag168_ts:roll_end]
                 rolling = float(window.mean()) if len(window) > 0 else None
 
             rows.append({
-                "forecast_horizon_dt":    slot,
-                "region":                 region,
-                "consommation_lag_24h":   lag24,
-                "consommation_lag_168h":  lag168,
+                "forecast_horizon_dt":       slot,
+                "region":                    region,
+                "consommation_lag_24h":      lag24,
+                "consommation_lag_168h":     lag168,
                 "consommation_rolling_168h": rolling,
             })
 
+    if n_fallback:
+        LOG.warning("forecast: lag_24h missing for %d rows — used lag_48h fallback", n_fallback)
     return pd.DataFrame(rows)
 
 
