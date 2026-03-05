@@ -22,3 +22,22 @@ resource "google_project_iam_member" "sa_roles" {
   role    = each.value
   member  = "serviceAccount:${google_service_account.jobs_sa.email}"
 }
+
+# ── Cloud Build SA — needed to deploy Cloud Run on push to main ───────────────
+
+locals {
+  cloudbuild_sa = "serviceAccount:${data.google_project.this.number}@cloudbuild.gserviceaccount.com"
+}
+
+resource "google_project_iam_member" "cloudbuild_run_developer" {
+  project = var.project_id
+  role    = "roles/run.developer"
+  member  = local.cloudbuild_sa
+}
+
+# Allows Cloud Build to deploy Cloud Run services that run as jobs_sa
+resource "google_service_account_iam_member" "cloudbuild_act_as_jobs_sa" {
+  service_account_id = google_service_account.jobs_sa.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = local.cloudbuild_sa
+}

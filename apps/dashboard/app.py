@@ -1,14 +1,13 @@
-"""Streamlit dashboard — forecasts vs actuals per region + monitoring metrics."""
+"""Streamlit dashboard — France electricity demand forecast."""
 
 import os
 
-import folium
+import requests
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from dotenv import load_dotenv
 from google.cloud import bigquery
-from streamlit_folium import st_folium
 
 load_dotenv()
 
@@ -29,9 +28,22 @@ REGION_CENTROIDS: dict[str, tuple[float, float]] = {
     "Provence-Alpes-Côte d'Azur": (43.9352,  6.0679),
 }
 
-EXPECTED_SLOTS_24H = 96 * 12   # 15-min slots × 12 regions
-ALL_REGIONS        = "All regions"
-MAP_COLOR          = "#2563EB"
+FRANCE_GEOJSON_URL = (
+    "https://raw.githubusercontent.com/gregoiredavid/france-geojson/master"
+    "/regions-version-simplifiee.geojson"
+)
+
+EXPECTED_SLOTS_24H = 96 * 12
+FRANCE_TOTAL       = "France (total)"
+
+# Blue palette used throughout all charts for visual coherence
+_C0 = "#EFF6FF"   # lightest
+_C1 = "#BFDBFE"
+_C2 = "#3B82F6"
+_C3 = "#2563EB"
+_C4 = "#1D4ED8"
+_C5 = "#1E3A8A"   # darkest
+BLUE_SCALE = [[0.0, _C0], [0.35, _C1], [0.65, _C3], [1.0, _C5]]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -41,6 +53,16 @@ MAP_COLOR          = "#2563EB"
 @st.cache_resource
 def _bq() -> bigquery.Client:
     return bigquery.Client(project=PROJECT)
+
+
+@st.cache_data(ttl=86400)
+def load_france_geojson() -> dict | None:
+    try:
+        resp = requests.get(FRANCE_GEOJSON_URL, timeout=15)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception:
+        return None
 
 
 @st.cache_data(ttl=300)
@@ -71,9 +93,8 @@ def load_actuals(hours: int = 48) -> pd.DataFrame:
 def load_system_status() -> dict:
     sql = f"""
     SELECT
-        (SELECT MAX(_ingested_at)     FROM `{PROJECT}.elec_raw.eco2mix`)       AS last_ingest,
-        (SELECT MAX(_materialized_at) FROM `{PROJECT}.elec_features.features`) AS last_features,
-        (SELECT MAX(forecasted_at)    FROM `{PROJECT}.elec_ml.predictions`)    AS last_forecast
+        (SELECT MAX(_ingested_at)  FROM `{PROJECT}.elec_raw.eco2mix`)    AS last_ingest,
+        (SELECT MAX(forecasted_at) FROM `{PROJECT}.elec_ml.predictions`) AS last_forecast
     """
     return _bq().query(sql).to_dataframe().iloc[0].to_dict()
 
@@ -160,52 +181,60 @@ def _fmt_mw(v, suffix=" MW") -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Map
+# Chart builders
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_map(forecasts: pd.DataFrame) -> folium.Map:
-    avg_mw = forecasts.groupby("region")["predicted_mw"].mean()
-    min_mw = avg_mw.min()
-    rng    = (avg_mw.max() - min_mw) or 1.0
-
-    m = folium.Map(tiles="CartoDB positron", zoom_start=6)
-    m.fit_bounds([[42.3, -5.1], [51.1, 9.6]])
-
-    for region, (lat, lon) in REGION_CENTROIDS.items():
-        if region not in avg_mw.index:
-            continue
-        mw = avg_mw[region]
-        t  = (mw - min_mw) / rng
-        folium.CircleMarker(
-            location=[lat, lon],
-            radius=10 + t * 20,
-            color=MAP_COLOR,
-            fill=True,
-            fill_color=MAP_COLOR,
-            fill_opacity=0.30 + t * 0.55,
-            weight=1.5,
-            tooltip=folium.Tooltip(
-                f"<b style='font-size:13px'>{region}</b>"
-                f"<br>Avg predicted: <b>{mw:,.0f} MW</b>",
-                sticky=True,
-            ),
-        ).add_to(m)
-
-    return m
+_AXIS = dict(
+    showgrid=True, gridcolor="#E2E8F0", zeroline=False,
+    showline=True, linecolor="#CBD5E1",
+    tickfont=dict(color="#475569", size=11),
+)
+_CANVAS = dict(plot_bgcolor="white", paper_bgcolor="white")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Time-series chart
-# ─────────────────────────────────────────────────────────────────────────────
+def build_choropleth(forecasts: pd.DataFrame, geojson: dict) -> go.Figure:
+    avg_mw = (
+        forecasts.groupby("region")["predicted_mw"]
+        .mean().reset_index()
+        .rename(columns={"predicted_mw": "avg_mw"})
+    )
+    fig = go.Figure(go.Choroplethmapbox(
+        geojson=geojson,
+        locations=avg_mw["region"],
+        z=avg_mw["avg_mw"],
+        featureidkey="properties.nom",
+        colorscale=BLUE_SCALE,
+        zmin=avg_mw["avg_mw"].min() * 0.85,
+        zmax=avg_mw["avg_mw"].max() * 1.05,
+        marker_opacity=0.82,
+        marker_line_width=1.5,
+        marker_line_color="white",
+        colorbar=dict(
+            title=dict(text="MW", font=dict(size=12, color="#64748B")),
+            thickness=12, len=0.65, x=1.0,
+            tickfont=dict(size=10, color="#475569"),
+        ),
+        hovertemplate="<b>%{location}</b><br>Avg predicted: <b>%{z:,.0f} MW</b><extra></extra>",
+    ))
+    fig.update_layout(
+        **_CANVAS,
+        title=dict(text="Predicted demand — avg next 24 h", font=dict(size=14, color="#0F172A")),
+        mapbox_style="carto-positron",
+        mapbox_zoom=4.5,
+        mapbox_center={"lat": 46.5, "lon": 2.5},
+        margin=dict(l=0, r=0, t=44, b=0),
+        height=490,
+    )
+    return fig
+
 
 def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str) -> go.Figure:
-    now_utc = pd.Timestamp.now(tz="UTC")
-
+    now_utc       = pd.Timestamp.now(tz="UTC")
     today_paris   = now_utc.tz_convert("Europe/Paris").normalize()
     day_start_utc = today_paris.tz_convert("UTC")
     day_end_utc   = (today_paris + pd.Timedelta(days=1)).tz_convert("UTC")
 
-    if region == ALL_REGIONS:
+    if region == FRANCE_TOTAL:
         pred_g = (
             forecasts.groupby("forecast_horizon_dt")["predicted_mw"]
             .sum().reset_index().sort_values("forecast_horizon_dt")
@@ -214,16 +243,16 @@ def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str
             actuals.groupby("date_heure")["consommation"]
             .sum().reset_index().sort_values("date_heure")
         )
-        px, py  = pred_g["forecast_horizon_dt"], pred_g["predicted_mw"]
+        px_, py = pred_g["forecast_horizon_dt"], pred_g["predicted_mw"]
         ax, ay  = act_g["date_heure"],           act_g["consommation"]
-        title   = "France total — Realized vs Predicted"
+        title   = "France — realized vs predicted"
         y_label = "Total consumption (MW)"
     else:
         pred_r = forecasts[forecasts["region"] == region].sort_values("forecast_horizon_dt")
         act_r  = actuals[actuals["region"] == region].sort_values("date_heure")
-        px, py  = pred_r["forecast_horizon_dt"], pred_r["predicted_mw"]
+        px_, py = pred_r["forecast_horizon_dt"], pred_r["predicted_mw"]
         ax, ay  = act_r["date_heure"],           act_r["consommation"]
-        title   = f"{region} — Realized vs Predicted"
+        title   = f"{region} — realized vs predicted"
         y_label = "Consumption (MW)"
 
     fig = go.Figure()
@@ -232,10 +261,14 @@ def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str
         line=dict(color="#1E3A5F", width=2), mode="lines",
     ))
     fig.add_trace(go.Scatter(
-        x=px, y=py, name="Predicted",
-        line=dict(color=MAP_COLOR, width=2, dash="dash"), mode="lines",
+        x=px_, y=py, name="Predicted",
+        line=dict(color=_C3, width=2, dash="dash"), mode="lines",
     ))
     fig.update_layout(
+        **_CANVAS,
+        title=dict(text=title, font=dict(size=14, color="#0F172A")),
+        xaxis=dict(**_AXIS, range=[day_start_utc, day_end_utc], title=None),
+        yaxis=dict(**_AXIS, title=y_label, title_font=dict(color="#475569")),
         shapes=[{
             "type": "line", "xref": "x", "yref": "paper",
             "x0": now_utc, "x1": now_utc, "y0": 0, "y1": 1,
@@ -247,32 +280,104 @@ def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str
             "font": {"color": "#94A3B8", "size": 11},
             "xanchor": "left", "yanchor": "top",
         }],
-        title=dict(text=title, font=dict(size=14, color="#0F172A")),
-        yaxis_title=y_label,
-        xaxis_title=None,
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        xaxis=dict(
-            range=[day_start_utc, day_end_utc],
-            showgrid=True, gridcolor="#E2E8F0", zeroline=False,
-            showline=True, linewidth=1, linecolor="#CBD5E1",
-            tickfont=dict(color="#475569", size=11),
-        ),
-        yaxis=dict(
-            showgrid=True, gridcolor="#E2E8F0", zeroline=False,
-            showline=True, linewidth=1, linecolor="#CBD5E1",
-            tickfont=dict(color="#475569", size=11),
-            title_font=dict(color="#475569"),
-        ),
         legend=dict(
-            x=0.01, y=0.99,
-            xanchor="left", yanchor="top",
-            bgcolor="#FFFFFF",
-            bordercolor="#94A3B8", borderwidth=1,
-            font=dict(size=13, color="#0F172A"),
+            x=0.01, y=0.99, xanchor="left", yanchor="top",
+            bgcolor="white", bordercolor="#E2E8F0", borderwidth=1,
+            font=dict(size=12, color="#0F172A"),
         ),
-        margin=dict(l=0, r=0, t=40, b=0),
-        height=360,
+        margin=dict(l=0, r=0, t=44, b=0),
+        height=420,
+    )
+    return fig
+
+
+def build_mae_bars(metrics_df: pd.DataFrame) -> go.Figure:
+    df = (
+        metrics_df[metrics_df["region"] != "France"]
+        .dropna(subset=["mae_mw"])
+        .sort_values("mae_mw", ascending=True)
+    )
+    france     = metrics_df[metrics_df["region"] == "France"]
+    france_mae = france["mae_mw"].iloc[0] if not france.empty else None
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=df["mae_mw"],
+        y=df["region"],
+        orientation="h",
+        marker=dict(
+            color=df["mae_mw"],
+            colorscale=[[0, _C1], [1, _C4]],
+            showscale=False,
+        ),
+        hovertemplate="%{y}: <b>%{x:,.0f} MW</b><extra></extra>",
+    ))
+    if france_mae is not None:
+        fig.add_vline(
+            x=france_mae,
+            line_dash="dot", line_color="#F97316", line_width=2,
+            annotation_text=f"France avg {france_mae:,.0f} MW",
+            annotation_position="top right",
+            annotation_font=dict(color="#F97316", size=11),
+        )
+    fig.update_layout(
+        **_CANVAS,
+        title=dict(text="MAE by region — 7d rolling", font=dict(size=14, color="#0F172A")),
+        xaxis=dict(**_AXIS, title="MAE (MW)"),
+        yaxis={**_AXIS, "showgrid": False},
+        margin=dict(l=0, r=20, t=44, b=0),
+        height=400,
+    )
+    return fig
+
+
+def build_heatmap(forecasts: pd.DataFrame) -> go.Figure:
+    df = forecasts.copy()
+    df["hour_paris"] = df["forecast_horizon_dt"].dt.tz_convert("Europe/Paris").dt.hour
+
+    pivot = (
+        df.groupby(["region", "hour_paris"])["predicted_mw"]
+        .mean()
+        .unstack("hour_paris")
+    )
+    # Most demand-intensive regions on top
+    pivot = pivot.loc[pivot.sum(axis=1).sort_values(ascending=False).index]
+
+    short_name = {
+        "Provence-Alpes-Côte d'Azur": "PACA",
+        "Auvergne-Rhône-Alpes":       "Auvergne-RA",
+        "Bourgogne-Franche-Comté":    "Bourgogne-FC",
+        "Centre-Val de Loire":         "Centre-VdL",
+    }
+    y_labels = [short_name.get(r, r) for r in pivot.index]
+    x_labels = [f"{h:02d}:00" for h in range(24)]
+
+    z_values = [
+        [pivot.loc[region, h] if h in pivot.columns else None for h in range(24)]
+        for region in pivot.index
+    ]
+
+    fig = go.Figure(go.Heatmap(
+        z=z_values,
+        x=x_labels,
+        y=y_labels,
+        colorscale=BLUE_SCALE,
+        hovertemplate="<b>%{y}</b>  %{x}<br>Avg predicted: <b>%{z:,.0f} MW</b><extra></extra>",
+        colorbar=dict(
+            title=dict(text="MW", font=dict(size=12, color="#64748B")),
+            thickness=12,
+            tickfont=dict(size=10, color="#475569"),
+        ),
+        xgap=2,
+        ygap=2,
+    ))
+    fig.update_layout(
+        **_CANVAS,
+        title=dict(text="Demand heatmap — region × hour (Paris time)", font=dict(size=14, color="#0F172A")),
+        xaxis=dict(tickfont=dict(color="#475569", size=10), showline=True, linecolor="#CBD5E1", tickangle=0),
+        yaxis=dict(tickfont=dict(color="#475569", size=11), showline=True, linecolor="#CBD5E1", autorange="reversed"),
+        margin=dict(l=0, r=0, t=44, b=40),
+        height=400,
     )
     return fig
 
@@ -285,6 +390,9 @@ st.set_page_config(page_title="Elec Forecast", layout="wide", page_icon="⚡")
 
 st.markdown("""
 <style>
+/* ── Hide default Streamlit top padding ──────────────────────────────── */
+[data-testid="stAppViewContainer"] > section > div:first-child { padding-top: 1rem; }
+
 /* ── Metric cards ─────────────────────────────────────────────────────── */
 [data-testid="stMetric"] {
     background: #F8FAFC;
@@ -304,6 +412,7 @@ st.markdown("""
     font-weight: 700 !important;
     color: #0F172A !important;
 }
+
 /* ── Freshness badges ─────────────────────────────────────────────────── */
 .badge {
     display: inline-block;
@@ -317,6 +426,7 @@ st.markdown("""
 .badge-ok   { background: #DCFCE7; color: #166534; }
 .badge-warn { background: #FEF9C3; color: #854D0E; }
 .badge-dead { background: #FEE2E2; color: #991B1B; }
+
 /* ── Pipeline status bar ──────────────────────────────────────────────── */
 .status-bar {
     display: flex;
@@ -327,48 +437,23 @@ st.markdown("""
     color: #64748B;
 }
 .status-sep { color: #CBD5E1; }
-/* ── Section labels ───────────────────────────────────────────────────── */
-.section-label {
-    font-size: 11px;
-    color: #94A3B8;
-    text-transform: uppercase;
-    letter-spacing: .08em;
-    font-weight: 700;
-    margin: 0 0 10px 0;
-}
-/* ── Chart card ───────────────────────────────────────────────────────── */
+
+/* ── Chart cards — uniform border + shadow for all Plotly charts ─────── */
 [data-testid="stPlotlyChart"] {
     border: 1px solid #E2E8F0;
     border-radius: 12px;
-    padding: 12px 12px 2px;
+    padding: 12px 12px 4px;
     background: #fff;
-    box-shadow: 0 1px 4px rgba(15,23,42,.05);
+    box-shadow: 0 1px 6px rgba(15,23,42,.06);
     overflow: hidden;
 }
-/* ── Chart+map row: equal height columns ──────────────────────────────── */
-[data-testid="stHorizontalBlock"]:has([data-testid="stVerticalBlockBorderWrapper"]) {
-    align-items: stretch;
-}
-[data-testid="stHorizontalBlock"]:has([data-testid="stVerticalBlockBorderWrapper"])
-    > [data-testid="stColumn"] > [data-testid="stVerticalBlock"] {
-    height: 100%;
-}
-/* ── Map card (st.container border=True) ──────────────────────────────── */
-[data-testid="stVerticalBlockBorderWrapper"] {
-    border: 1px solid #E2E8F0 !important;
-    border-radius: 12px !important;
-    box-shadow: 0 1px 4px rgba(15,23,42,.05) !important;
-    background: #fff !important;
-    padding: 14px 14px 10px !important;
-    height: 100% !important;
-    box-sizing: border-box !important;
-}
-/* ── Region selector — compact pill above chart ───────────────────────── */
+
+/* ── Region selector — compact, pill-shaped ───────────────────────────── */
 .region-selector [data-testid="stSelectbox"] > div > div {
     border-radius: 20px;
     border-color: #E2E8F0;
     font-size: 13px;
-    min-height: 34px;
+    min-height: 32px;
     padding: 0 12px;
     background: #F8FAFC;
 }
@@ -386,12 +471,12 @@ with st.spinner("Loading…"):
     status     = load_system_status()
     metrics_df = load_metrics()
     n_complete = load_completeness()
+    geojson    = load_france_geojson()
 
-# Keep only timestamps where all 12 regions have reported.
-# Partial timestamps (API lag) produce artificially low sums — drop them.
-_N_REGIONS = len(REGION_CENTROIDS)
+# Drop partial timestamps (API lag: not all 12 regions have reported yet)
+_N_REGIONS   = len(REGION_CENTROIDS)
 _complete_ts = actuals.groupby("date_heure")["region"].nunique()
-actuals = actuals[actuals["date_heure"].isin(_complete_ts[_complete_ts == _N_REGIONS].index)]
+actuals      = actuals[actuals["date_heure"].isin(_complete_ts[_complete_ts == _N_REGIONS].index)]
 
 if forecasts.empty:
     st.warning("No forecast data yet — run the forecast job first.")
@@ -401,22 +486,21 @@ now_utc       = pd.Timestamp.now(tz="UTC")
 forecasted_at = forecasts["forecasted_at"].iloc[0]
 model_ver     = (forecasts["model_version"].iloc[0] or "")[:8]
 
-fut = forecasts[forecasts["forecast_horizon_dt"] > now_utc]
+fut          = forecasts[forecasts["forecast_horizon_dt"] > now_utc]
 france_total = (
     fut[fut["forecast_horizon_dt"] == fut["forecast_horizon_dt"].min()]["predicted_mw"].sum()
     if not fut.empty else None
 )
-
 completeness_pct = round(100 * n_complete / EXPECTED_SLOTS_24H, 1)
 
 france_row = metrics_df[metrics_df["region"] == "France"]
-mae_mw    = france_row["mae_mw"].iloc[0]       if not france_row.empty else None
-p95_mw    = france_row["p95_error_mw"].iloc[0] if not france_row.empty else None
-n_matched = int(france_row["n_samples"].iloc[0]) if not france_row.empty else 0
+mae_mw     = france_row["mae_mw"].iloc[0]       if not france_row.empty else None
+p95_mw     = france_row["p95_error_mw"].iloc[0] if not france_row.empty else None
+n_matched  = int(france_row["n_samples"].iloc[0]) if not france_row.empty else 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Header — title + pipeline status
+# Header
 # ─────────────────────────────────────────────────────────────────────────────
 
 col_title, col_status = st.columns([3, 2])
@@ -427,13 +511,10 @@ with col_title:
 
 with col_status:
     ingest_ts   = status.get("last_ingest")
-    features_ts = status.get("last_features")
     forecast_ts = status.get("last_forecast")
     st.markdown(
         f'<div class="status-bar" style="justify-content:flex-end; padding-top:14px">'
         f'{_badge("Ingest", ingest_ts)} <span>{_ago(ingest_ts)}</span>'
-        f' <span class="status-sep">·</span>'
-        f' {_badge("Features", features_ts)} <span>{_ago(features_ts)}</span>'
         f' <span class="status-sep">·</span>'
         f' {_badge("Forecast", forecast_ts, daily=True)} <span>{_ago(forecast_ts)}</span>'
         f'</div>',
@@ -461,25 +542,37 @@ k4.metric(
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Chart | Map
+# Row 1: Choropleth map | Time series
 # ─────────────────────────────────────────────────────────────────────────────
 
-col_chart, col_map = st.columns([1.6, 1])
-
-with col_chart:
-    # Label + region selector inline
-    lbl_col, sel_col = st.columns([2, 1.2])
-    with lbl_col:
-        st.markdown('<p class="section-label">Realized vs Predicted</p>', unsafe_allow_html=True)
-    with sel_col:
-        regions    = [ALL_REGIONS] + sorted(forecasts["region"].unique().tolist())
-        st.markdown('<div class="region-selector">', unsafe_allow_html=True)
-        sel_region = st.selectbox("Region", options=regions, index=0, label_visibility="collapsed")
-        st.markdown('</div>', unsafe_allow_html=True)
-    st.plotly_chart(build_timeseries(forecasts, actuals, sel_region), use_container_width=True)
+col_map, col_ts = st.columns([1, 1.4])
 
 with col_map:
-    with st.container(border=True):
-        st.markdown('<p class="section-label">Predicted demand · avg next 24 h</p>', unsafe_allow_html=True)
-        st_folium(build_map(forecasts), width=None, height=306, returned_objects=[])
-        st.caption("Circle size and opacity → relative predicted demand.")
+    if geojson:
+        st.plotly_chart(build_choropleth(forecasts, geojson), use_container_width=True)
+    else:
+        st.info("Map unavailable — GeoJSON could not be fetched.")
+
+with col_ts:
+    regions    = [FRANCE_TOTAL] + sorted(forecasts["region"].unique().tolist())
+    st.plotly_chart(build_timeseries(forecasts, actuals, st.session_state.get("sel_region", FRANCE_TOTAL)), use_container_width=True)
+    st.markdown('<div class="region-selector">', unsafe_allow_html=True)
+    sel_region = st.selectbox("Region", options=regions, index=0, label_visibility="collapsed", key="sel_region")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Row 2: MAE bar chart | Demand heatmap
+# ─────────────────────────────────────────────────────────────────────────────
+
+col_mae, col_heat = st.columns([1, 1.6])
+
+with col_mae:
+    if not metrics_df.empty:
+        st.plotly_chart(build_mae_bars(metrics_df), use_container_width=True)
+    else:
+        st.info("No metrics yet — run the metrics job first.")
+
+with col_heat:
+    st.plotly_chart(build_heatmap(forecasts), use_container_width=True)
