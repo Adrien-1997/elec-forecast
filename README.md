@@ -12,6 +12,10 @@ End-to-end ML pipeline for **day-ahead electricity demand forecasting** across 1
 
 **Live dashboard**: [elec-dashboard-931951823998.europe-west9.run.app](https://elec-dashboard-931951823998.europe-west9.run.app)
 
+![Dashboard screenshot](assets/dashboard.png)
+
+The dashboard shows four KPI cards (France total predicted MW, 7-day rolling MAE, p95 error, 24h data completeness), a choropleth map of predicted regional demand, and a 24-hour actual vs. predicted time series with a live "now" line.
+
 ---
 
 ## Overview
@@ -290,7 +294,7 @@ All jobs share a single Docker image (`Dockerfile.jobs`); the `JOB_MODULE` envir
 - [x] Backfill pipeline — `backfill` job + `scripts/full_pipeline.ps1` for full data reset
 - [x] Initial training run — model trained on 2024-01-01 → today, live forecasts on dashboard
 - [ ] MLflow server on Cloud Run (self-hosted experiment tracking UI)
-- [ ] GitHub → Cloud Build trigger (CI on push to main)
+- [x] GitHub → Cloud Build trigger (CI on push to main)
 - [ ] Drift monitoring: PSI/KS test on feature distributions, rolling MAE vs baseline
 - [ ] Automated retrain policy: trigger when 7-day MAE exceeds threshold
 - [ ] Data retention: BQ partition expiry (raw 90d, features 30d) + GCS model rotation (keep last 3)
