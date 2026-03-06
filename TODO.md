@@ -29,14 +29,17 @@
 ## CI/CD + deployment
 - [x] `infra/cloudrun/deploy.ps1` — build via Cloud Build + deploy 6 Jobs + dashboard (`:latest` tag)
 - [x] `infra/cloudrun/cloudbuild.yaml` — builds images tagged `:{SHA}` + `:latest`
-- [x] Cloud Scheduler jobs — features schedule changed to weekly (Sun 01:50); now managed by Terraform
+- [x] Cloud Scheduler jobs — features + train changed to daily (01:50 / 02:00 Paris); managed by Terraform
 - [x] Verified all 6 Cloud Run jobs execute successfully (incl. backfill)
-- [ ] Redeploy containers + apply Terraform: `.\infra\cloudrun\deploy.ps1` then `terraform apply`
-- [ ] Connect Cloud Build to GitHub repo (trigger on push to main)
+- [x] Connect Cloud Build to GitHub repo (trigger on push to main)
+- [x] Commit + push all current fixes (forecast lag alignment, daily schedule, 90d lookback, dashboard v2)
 
 ## Data pipeline operations
 - [x] **Backfill**: `backfill/run.py` job — eco2mix-regional-cons-def (2024) + eco2mix-regional-tr (2025+); `scripts/full_pipeline.ps1` orchestrates full reset
 - [x] **Initial training run**: model trained on 2024-01-01 → today; MLflow run logged locally; model artifact on GCS
+- [x] **Forecast lag alignment fix**: inference features aligned to T=slot-24h (lag_24h=eco[slot-48h], lag_168h=eco[slot-192h]); ECO_LOOKBACK_H bumped to 216h
+- [x] **Daily retrain**: features + train jobs changed from weekly to daily; `TRAIN_LOOKBACK_DAYS=90` rolling window
+- [x] **Dashboard v2**: contact header (Adrien Morel + links), system check badges (Ingest·Features / Forecast·Retrain / Eval), model_ver + forecasted_at from latest batch
 - [x] Validate end-to-end pipeline: all 6 jobs run locally + on Cloud Run; dashboard shows predictions + freshness badges
 
 ## Monitoring & retraining

@@ -20,7 +20,7 @@ The dashboard shows four KPI cards (France total predicted MW, 7-day rolling MAE
 
 ## Overview
 
-This project forecasts regional electricity consumption in France at 15-minute granularity, 24 hours ahead. The full pipeline runs autonomously on GCP free-tier infrastructure: data is ingested every 15 minutes from two public APIs, features are materialised into BigQuery, a LightGBM model is retrained weekly, and predictions are served through a Streamlit dashboard with live monitoring metrics.
+This project forecasts regional electricity consumption in France at 15-minute granularity, 24 hours ahead. The full pipeline runs autonomously on GCP free-tier infrastructure: data is ingested every 15 minutes from two public APIs, features are materialised into BigQuery, a LightGBM model is retrained daily on a rolling 90-day window, and predictions are served through a Streamlit dashboard with live monitoring metrics.
 
 The goal is a production-grade ML system — not just a notebook — with proper data contracts, experiment tracking, scheduled jobs, monitoring, and a deployment pipeline.
 
@@ -56,12 +56,10 @@ Every 15 min:
   :00/:15/:30/:45  →  ingest   — fetch new eco2mix + weather → BQ raw
           +10 min  →  metrics  — rolling 7d MAE/p95/p99 → BQ elec_ml.metrics
 
-Weekly (Sunday):
-  01:50 Sun  →  features — materialise feature store from raw (only train reads it)
-  02:00 Sun  →  train    — full feature store → LightGBM → MLflow + GCS
-
-Daily:
-  06:00 Paris  →  forecast — eco history lags + Open-Meteo live forecast → 96×12 predictions → BQ
+Daily (Paris time):
+  01:50  →  features — incremental feature store materialisation from raw
+  02:00  →  train    — rolling 90-day window → LightGBM → MLflow + GCS
+  06:00  →  forecast — eco history lags + Open-Meteo live forecast → 96×12 predictions → BQ
 
 On-demand:
   backfill  →  historical eco2mix + weather → BQ raw (run before first train or after data reset)
@@ -260,13 +258,13 @@ python -m elec_jobs
 | Job | Schedule (Paris) | Description |
 |---|---|---|
 | `ingest` | `*/15 * * * *` | Pull new eco2mix records + weather → BQ raw (UPSERT) |
-| `features` | `50 1 * * 0` (Sun 01:50) | Compute lags, rolling avg, calendar features → BQ feature store |
-| `train` | `0 2 * * 0` (Sun 02:00) | Train LightGBM on full feature store, log to MLflow, push model to GCS |
+| `features` | `50 1 * * *` (daily 01:50) | Incremental feature materialisation from raw (lags, rolling avg, calendar) → BQ feature store |
+| `train` | `0 2 * * *` (daily 02:00) | Train LightGBM on rolling 90-day window, log to MLflow, push model to GCS |
 | `forecast` | `0 6 * * *` (daily 06:00) | Eco history lags + Open-Meteo live forecast → 96×12 predictions → UPSERT `elec_ml.predictions` |
 | `metrics` | `10,25,40,55 * * * *` | predictions × actuals → rolling 7d MAE/p95/p99 → UPSERT `elec_ml.metrics` |
 | `backfill` | Manual only | Historical eco2mix + weather → BQ raw; use before first train or after a data reset |
 
-Features run weekly (not every 15 min) because only the train job reads the feature store.
+Features and train run daily (not weekly) to keep the model fresh; the 90-day rolling window focuses training on recent patterns while covering full seasonal variation.
 
 All jobs share a single Docker image (`Dockerfile.jobs`); the `JOB_MODULE` environment variable selects the entry point. Images are tagged both `:{git-sha}` (audit trail) and `:latest` (stable reference for Cloud Run).
 
@@ -289,12 +287,13 @@ All jobs share a single Docker image (`Dockerfile.jobs`); the `JOB_MODULE` envir
 ## Roadmap
 
 - [x] Terraform for all GCP resources (GCS, BQ, IAM, Scheduler, Secrets, Artifact Registry)
-- [x] Dashboard redesign — unified Plotly + Folium layout, completeness filter, freshness badges
-- [x] Forecast fixes — lag_48h fallback for API lag, rolling window leak fixed
+- [x] Dashboard redesign — contact header, system check badges (Ingest/Features/Forecast/Retrain/Eval), orange "now" line, France-total KPI tooltips
+- [x] Forecast lag alignment fix — inference features aligned to T=slot-24h matching training convention
+- [x] Fixed forecast window — always anchored at 06:00 Paris regardless of job start time
+- [x] Daily retrain pipeline — features 01:50 → train 02:00 → forecast 06:00; rolling 90-day training window
 - [x] Backfill pipeline — `backfill` job + `scripts/full_pipeline.ps1` for full data reset
-- [x] Initial training run — model trained on 2024-01-01 → today, live forecasts on dashboard
-- [ ] MLflow server on Cloud Run (self-hosted experiment tracking UI)
 - [x] GitHub → Cloud Build trigger (CI on push to main)
+- [ ] MLflow server on Cloud Run (self-hosted experiment tracking UI)
 - [ ] Drift monitoring: PSI/KS test on feature distributions, rolling MAE vs baseline
 - [ ] Automated retrain policy: trigger when 7-day MAE exceeds threshold
 - [ ] Data retention: BQ partition expiry (raw 90d, features 30d) + GCS model rotation (keep last 3)

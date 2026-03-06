@@ -12,6 +12,7 @@ from google.cloud import bigquery
 load_dotenv()
 
 PROJECT = os.environ["GCP_PROJECT_ID"].strip()
+BUCKET  = os.environ.get("GCS_BUCKET", "").strip()
 
 REGION_CENTROIDS: dict[str, tuple[float, float]] = {
     "Île-de-France":               (48.8566,  2.3522),
@@ -93,10 +94,26 @@ def load_actuals(hours: int = 48) -> pd.DataFrame:
 def load_system_status() -> dict:
     sql = f"""
     SELECT
-        (SELECT MAX(_ingested_at)  FROM `{PROJECT}.elec_raw.eco2mix`)    AS last_ingest,
-        (SELECT MAX(forecasted_at) FROM `{PROJECT}.elec_ml.predictions`) AS last_forecast
+        (SELECT MAX(_ingested_at)     FROM `{PROJECT}.elec_raw.eco2mix`)        AS last_ingest,
+        (SELECT MAX(_materialized_at) FROM `{PROJECT}.elec_features.features`)  AS last_features,
+        (SELECT MAX(forecasted_at)    FROM `{PROJECT}.elec_ml.predictions`)     AS last_forecast,
+        (SELECT MAX(_computed_at)     FROM `{PROJECT}.elec_ml.metrics`)         AS last_eval
     """
     return _bq().query(sql).to_dataframe().iloc[0].to_dict()
+
+
+@st.cache_data(ttl=300)
+def load_train_status():
+    """Return the last-updated timestamp of models/latest_run_id in GCS, or None."""
+    if not BUCKET:
+        return None
+    try:
+        from google.cloud import storage as _gcs
+        blob = _gcs.Client(project=PROJECT).bucket(BUCKET).blob("models/latest_run_id")
+        blob.reload()
+        return blob.updated   # tz-aware datetime
+    except Exception:
+        return None
 
 
 @st.cache_data(ttl=300)
@@ -272,12 +289,12 @@ def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str
         shapes=[{
             "type": "line", "xref": "x", "yref": "paper",
             "x0": now_utc, "x1": now_utc, "y0": 0, "y1": 1,
-            "line": {"dash": "dot", "color": "#94A3B8", "width": 1},
+            "line": {"dash": "dot", "color": "#F97316", "width": 1.5},
         }],
         annotations=[{
             "x": now_utc, "y": 1, "xref": "x", "yref": "paper",
             "text": "now", "showarrow": False,
-            "font": {"color": "#94A3B8", "size": 11},
+            "font": {"color": "#F97316", "size": 11},
             "xanchor": "left", "yanchor": "top",
         }],
         legend=dict(
@@ -472,6 +489,7 @@ with st.spinner("Loading…"):
     metrics_df = load_metrics()
     n_complete = load_completeness()
     geojson    = load_france_geojson()
+    train_ts   = load_train_status()
 
 # Drop partial timestamps (API lag: not all 12 regions have reported yet)
 _N_REGIONS   = len(REGION_CENTROIDS)
@@ -483,8 +501,8 @@ if forecasts.empty:
     st.stop()
 
 now_utc       = pd.Timestamp.now(tz="UTC")
-forecasted_at = forecasts["forecasted_at"].iloc[0]
-model_ver     = (forecasts["model_version"].iloc[0] or "")[:8]
+forecasted_at = forecasts["forecasted_at"].max()
+model_ver     = (forecasts.loc[forecasts["forecasted_at"].idxmax(), "model_version"] or "")[:8]
 
 fut          = forecasts[forecasts["forecast_horizon_dt"] > now_utc]
 france_total = (
@@ -500,6 +518,34 @@ n_matched  = int(france_row["n_samples"].iloc[0]) if not france_row.empty else 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Contact icons (used in header + footer)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ICON_LI = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="#0A66C2">'
+    '<path d="M20.45 20.45h-3.56v-5.57c0-1.33-.03-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.34V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.45v6.29zM5.34 7.43a2.07 2.07 0 110-4.14 2.07 2.07 0 010 4.14zM3.56 20.45h3.57V9H3.56v11.45zM22.23 0H1.77C.79 0 0 .77 0 1.72v20.56C0 23.23.79 24 1.77 24h20.46c.98 0 1.77-.77 1.77-1.72V1.72C24 .77 23.21 0 22.23 0z"/>'
+    '</svg>'
+)
+_ICON_GH = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="#0F172A">'
+    '<path d="M12 .3a12 12 0 00-3.79 23.4c.6.1.82-.26.82-.58v-2.03c-3.34.73-4.04-1.6-4.04-1.6-.54-1.38-1.33-1.75-1.33-1.75-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.8 1.3 3.49.99.1-.78.42-1.3.76-1.6-2.66-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.17 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 016 0c2.28-1.55 3.29-1.23 3.29-1.23.66 1.65.24 2.87.12 3.17.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.82.58A12 12 0 0012 .3z"/>'
+    '</svg>'
+)
+_ICON_MAIL = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#64748B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<rect x="2" y="4" width="20" height="16" rx="2"/>'
+    '<path d="M2 7l10 7 10-7"/>'
+    '</svg>'
+)
+_ICON_PIN = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>'
+    '<circle cx="12" cy="9" r="2.5"/>'
+    '</svg>'
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Header
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -507,16 +553,48 @@ col_title, col_status = st.columns([3, 2])
 
 with col_title:
     st.markdown("## ⚡ Electricity Demand Forecast France")
-    st.caption(f"Model `{model_ver}…` · Forecasted {_ago(forecasted_at)}")
+    st.markdown(
+        f'<div style="display:flex; align-items:center; gap:14px; margin-top:2px; flex-wrap:wrap;">'
+        f'<span style="font-size:13px; color:#64748B;">Model <code>{model_ver}…</code> · Forecasted {_ago(forecasted_at)}</span>'
+        f'<span style="color:#CBD5E1;">·</span>'
+        f'<span style="font-size:13px; font-weight:600; color:#475569;">Adrien Morel</span>'
+        f'<a href="https://www.linkedin.com/in/adrien-morel/" target="_blank"'
+        f'   style="display:inline-flex; align-items:center; gap:4px; color:#0A66C2; text-decoration:none; font-size:13px;">'
+        f'  {_ICON_LI}&nbsp;LinkedIn</a>'
+        f'<a href="mailto:adrien.morel@gmail.com"'
+        f'   style="display:inline-flex; align-items:center; gap:4px; color:#475569; text-decoration:none; font-size:13px;">'
+        f'  {_ICON_MAIL}&nbsp;adrien.morel@gmail.com</a>'
+        f'<a href="https://github.com/Adrien-1997/elec-forecast" target="_blank"'
+        f'   style="display:inline-flex; align-items:center; gap:4px; color:#0F172A; text-decoration:none; font-size:13px; font-weight:500;">'
+        f'  {_ICON_GH}&nbsp;GitHub</a>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 with col_status:
     ingest_ts   = status.get("last_ingest")
+    features_ts = status.get("last_features")
     forecast_ts = status.get("last_forecast")
+    eval_ts     = status.get("last_eval")
     st.markdown(
-        f'<div class="status-bar" style="justify-content:flex-end; padding-top:14px">'
-        f'{_badge("Ingest", ingest_ts)} <span>{_ago(ingest_ts)}</span>'
-        f' <span class="status-sep">·</span>'
-        f' {_badge("Forecast", forecast_ts, daily=True)} <span>{_ago(forecast_ts)}</span>'
+        f'<div style="padding-top:10px; text-align:right;">'
+        f'  <div style="font-size:11px; color:#94A3B8; text-transform:uppercase;'
+        f'       letter-spacing:.06em; font-weight:600; margin-bottom:5px;">System check</div>'
+        f'  <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">'
+        f'    <div class="status-bar" style="justify-content:flex-end;">'
+        f'      <span style="white-space:nowrap">{_badge("Ingest", ingest_ts)} {_ago(ingest_ts)}</span>'
+        f'      <span class="status-sep">·</span>'
+        f'      <span style="white-space:nowrap">{_badge("Features", features_ts, daily=True)} {_ago(features_ts)}</span>'
+        f'    </div>'
+        f'    <div class="status-bar" style="justify-content:flex-end;">'
+        f'      <span style="white-space:nowrap">{_badge("Forecast", forecast_ts, daily=True)} {_ago(forecast_ts)}</span>'
+        f'      <span class="status-sep">·</span>'
+        f'      <span style="white-space:nowrap">{_badge("Retrain", train_ts, daily=True)} {_ago(train_ts)}</span>'
+        f'    </div>'
+        f'    <div class="status-bar" style="justify-content:flex-end;">'
+        f'      <span style="white-space:nowrap">{_badge("Eval", eval_ts)} {_ago(eval_ts)}</span>'
+        f'    </div>'
+        f'  </div>'
         f'</div>',
         unsafe_allow_html=True,
     )
@@ -530,10 +608,13 @@ st.divider()
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("France total · next 15 min (predicted)", _fmt_mw(france_total))
 k2.metric(
-    "MAE — 7d rolling", _fmt_mw(mae_mw),
-    help=f"{n_matched:,} complete forecast slots evaluated",
+    "MAE · France total · 7d rolling", _fmt_mw(mae_mw),
+    help=f"Mean absolute error on France-total predictions (sum of all 12 regions). {n_matched:,} complete forecast slots evaluated over the last 7 days.",
 )
-k3.metric("p95 error", _fmt_mw(p95_mw))
+k3.metric(
+    "p95 error · France total · 7d", _fmt_mw(p95_mw),
+    help="95th-percentile absolute error on France-total predictions over the last 7 days. 95% of forecasts are within this value.",
+)
 k4.metric(
     "Data completeness (24 h)", f"{completeness_pct} %",
     help=f"{n_complete:,} / {EXPECTED_SLOTS_24H:,} expected 15-min slots",
@@ -576,3 +657,14 @@ with col_mae:
 
 with col_heat:
     st.plotly_chart(build_heatmap(forecasts), use_container_width=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Footer
+# ─────────────────────────────────────────────────────────────────────────────
+
+st.markdown(
+    f'<div style="text-align:right; color:#CBD5E1; font-size:12px; padding:8px 0 4px;">'
+    f'{_ICON_PIN}&nbsp;Paris · 2026</div>',
+    unsafe_allow_html=True,
+)

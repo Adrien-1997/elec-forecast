@@ -4,7 +4,7 @@ Schedule: daily at 06:00 Europe/Paris (04:00 UTC) via Cloud Scheduler.
 
 Strategy:
 - Generate 96 future 15-min slots (next 24h from the nearest future 15-min boundary).
-- Pull last 8 days of eco2mix from BQ → compute lag_24h, lag_168h, rolling_168h in Python.
+- Pull last 9 days of eco2mix from BQ → compute lag_24h, lag_168h, rolling_168h in Python.
 - Fetch Open-Meteo weather forecast (forecast_days=2) per region centroid — no BQ round-trip.
 - Add calendar features (Paris timezone) + French public holiday flag.
 - Score 1,152 rows (96 slots × 12 regions) with the champion LightGBM model.
@@ -20,6 +20,7 @@ import logging
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import holidays
 import lightgbm as lgb
@@ -31,7 +32,8 @@ from elec_jobs.shared import config, gcs
 from elec_jobs.shared.bq import get_client, merge_to_bq
 
 LOG = logging.getLogger(__name__)
-UTC = timezone.utc
+UTC   = timezone.utc
+PARIS = ZoneInfo("Europe/Paris")
 
 # Sorted list of region names — must match train/run.py exactly.
 REGION_CATEGORIES: list[str] = sorted(v[0] for v in config.REGION_CENTROIDS.values())
@@ -52,7 +54,7 @@ FEATURE_COLS = [
 ]
 
 HORIZON_STEPS   = 96    # 15-min slots in 24 h
-ECO_LOOKBACK_H  = 192   # 8 days: covers 168 h lag + buffer
+ECO_LOOKBACK_H  = 216   # 9 days: covers lag alignment shift (slot-192h) + buffer
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -76,8 +78,14 @@ def _load_model(run_id: str) -> lgb.Booster:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _generate_slots(now: datetime) -> list[pd.Timestamp]:
-    """96 future 15-min slots starting from the next 15-min boundary."""
-    start = pd.Timestamp(now).ceil("15min")
+    """96 fixed 15-min slots: 06:00 Paris today → 05:45 Paris tomorrow.
+
+    The window is anchored to 06:00 Paris regardless of when the job runs,
+    so re-runs are idempotent and there is no leakage from slots that were
+    observed after the model was scored.
+    """
+    today = now.astimezone(PARIS).date()
+    start = datetime(today.year, today.month, today.day, 6, 0, tzinfo=PARIS)
     return list(pd.date_range(start, periods=HORIZON_STEPS, freq="15min"))
 
 
@@ -107,15 +115,21 @@ def _build_lag_features(
 ) -> pd.DataFrame:
     """Compute lag_24h, lag_168h, rolling_168h for every (slot, region) pair.
 
-    Uses pandas index lookups — O(steps × regions × log N_eco).
-    rolling_168h = mean of eco[slot-168h : slot-15min], matching the training
-    window (excludes current row, consistent with RANGE … AND 900 PRECEDING in SQL).
+    Alignment with training
+    ───────────────────────
+    The model was trained on rows where features are at time T and the target
+    is consommation at T+24h.  To feed the model correctly for a prediction
+    slot S (= T+24h), we must compute all lag/rolling features at T = S-24h:
 
-    lag_24h fallback: the last ~7h of the 96-slot window reference eco timestamps
-    that fall within the API lag window (~7h) and are absent from BQ.  When
-    lag_24h is unavailable, lag_48h (same time two days ago) is used instead —
-    a much better substitute than letting LightGBM handle NaN via its default
-    missing-value branch, which was never seen during training.
+        lag_24h  → eco[ T-24h ] = eco[ slot-48h  ]
+        lag_168h → eco[ T-168h] = eco[ slot-192h ]
+        rolling  → mean( eco[ T-168h : T-15min ] ) = eco[ slot-192h : slot-24h-15min ]
+
+    Using slot-relative offsets (as done before this fix) shifts every feature
+    24h forward relative to training, which causes systematic prediction error.
+
+    lag_24h fallback: when lag_24h (slot-48h) is unavailable, use lag_48h
+    (slot-72h = T-48h) — the same-time value three days ago.  Better than NaN.
     """
     eco_by_region: dict[str, pd.Series] = {}
     for region in regions:
@@ -129,10 +143,12 @@ def _build_lag_features(
     rows = []
     n_fallback = 0
     for slot in slots:
-        lag24_ts  = slot - pd.Timedelta(hours=24)
-        lag48_ts  = slot - pd.Timedelta(hours=48)   # fallback when lag_24h unavailable
-        lag168_ts = slot - pd.Timedelta(hours=168)
-        roll_end  = slot - pd.Timedelta(minutes=15) # exclude current slot (matches training SQL)
+        # T = "current time" at which the model conceptually makes this prediction
+        T         = slot - pd.Timedelta(hours=24)
+        lag24_ts  = T - pd.Timedelta(hours=24)   # slot - 48h
+        lag48_ts  = T - pd.Timedelta(hours=48)   # slot - 72h  (fallback)
+        lag168_ts = T - pd.Timedelta(hours=168)  # slot - 192h
+        roll_end  = T - pd.Timedelta(minutes=15) # slot - 24h - 15min
 
         for region in regions:
             r = eco_by_region.get(region, pd.Series(dtype=float))

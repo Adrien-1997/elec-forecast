@@ -52,6 +52,7 @@ FEATURE_COLS = [
 TARGET_COL = "consommation"
 VAL_FRACTION = 0.2   # last 20% of time range held out for validation
 MIN_ROWS = 200       # safety gate — abort if not enough data after join
+TRAIN_LOOKBACK_DAYS = 90  # rolling training window — keeps model focused on recent patterns
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -72,10 +73,10 @@ def _load_training_data(client: bigquery.Client) -> pd.DataFrame:
         ON  e.region     = f.region
         AND e.date_heure = TIMESTAMP_ADD(f.date_heure, INTERVAL 24 HOUR)
     WHERE
-        f.consommation_lag_24h IS NOT NULL  -- exclude first 24h (no lag history)
+        f.date_heure >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {TRAIN_LOOKBACK_DAYS} DAY)
+        AND f.consommation_lag_24h IS NOT NULL  -- exclude first 24h (no lag history)
         AND e.consommation     IS NOT NULL
         -- lag_168h allowed to be NULL: LightGBM handles missing values natively.
-        -- Will be non-NULL once we have 14d+ of raw data (backfill or steady state).
     ORDER BY f.date_heure
     """
     df = client.query(sql).to_dataframe()
