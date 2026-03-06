@@ -41,6 +41,7 @@ REGION_CATEGORIES: list[str] = sorted(v[0] for v in config.REGION_CENTROIDS.valu
 FEATURE_COLS = [
     "region",                       # categorical — LightGBM native handling
     "consommation_lag_24h",
+    "consommation_lag_48h",
     "consommation_lag_168h",
     "consommation_rolling_168h",
     "temperature_celsius",
@@ -172,6 +173,7 @@ def _build_lag_features(
                 "forecast_horizon_dt":       slot,
                 "region":                    region,
                 "consommation_lag_24h":      lag24,
+                "consommation_lag_48h":      lag48,
                 "consommation_lag_168h":     lag168,
                 "consommation_rolling_168h": rolling,
             })

@@ -2,6 +2,7 @@
   {"name": "date_heure",                "type": "TIMESTAMP", "mode": "REQUIRED"},
   {"name": "region",                    "type": "STRING",    "mode": "REQUIRED"},
   {"name": "consommation_lag_24h",      "type": "FLOAT64",   "mode": "NULLABLE"},
+  {"name": "consommation_lag_48h",      "type": "FLOAT64",   "mode": "NULLABLE"},
   {"name": "consommation_lag_168h",     "type": "FLOAT64",   "mode": "NULLABLE"},
   {"name": "consommation_rolling_168h", "type": "FLOAT64",   "mode": "NULLABLE"},
   {"name": "temperature_celsius",       "type": "FLOAT64",   "mode": "NULLABLE"},

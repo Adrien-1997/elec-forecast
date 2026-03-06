@@ -12,6 +12,11 @@ features:
     source_table: elec_raw.eco2mix
     description: Consumption (MW) at the same 15-min slot exactly 24h prior.
 
+  - name: consommation_lag_48h
+    type: float
+    source_table: elec_raw.eco2mix
+    description: Consumption (MW) at the same 15-min slot exactly 48h prior.
+
   - name: consommation_lag_168h
     type: float
     source_table: elec_raw.eco2mix

@@ -86,6 +86,7 @@ windowed AS (
 
         -- Point-in-time lags via self-join (handles gaps in raw data correctly).
         lag24.consommation                                                            AS consommation_lag_24h,
+        lag48.consommation                                                            AS consommation_lag_48h,
         lag168.consommation                                                           AS consommation_lag_168h,
 
         -- 7-day rolling average.  BQ RANGE windows require a numeric ORDER BY key,
@@ -115,6 +116,9 @@ windowed AS (
     LEFT JOIN eco AS lag24
         ON  lag24.region     = e.region
         AND lag24.date_heure = TIMESTAMP_SUB(e.date_heure, INTERVAL 24 HOUR)
+    LEFT JOIN eco AS lag48
+        ON  lag48.region     = e.region
+        AND lag48.date_heure = TIMESTAMP_SUB(e.date_heure, INTERVAL 48 HOUR)
     LEFT JOIN eco AS lag168
         ON  lag168.region     = e.region
         AND lag168.date_heure = TIMESTAMP_SUB(e.date_heure, INTERVAL 168 HOUR)

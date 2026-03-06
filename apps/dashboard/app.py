@@ -97,23 +97,16 @@ def load_system_status() -> dict:
         (SELECT MAX(_ingested_at)     FROM `{PROJECT}.elec_raw.eco2mix`)        AS last_ingest,
         (SELECT MAX(_materialized_at) FROM `{PROJECT}.elec_features.features`)  AS last_features,
         (SELECT MAX(forecasted_at)    FROM `{PROJECT}.elec_ml.predictions`)     AS last_forecast,
-        (SELECT MAX(_computed_at)     FROM `{PROJECT}.elec_ml.metrics`)         AS last_eval
+        (SELECT MAX(_computed_at)     FROM `{PROJECT}.elec_ml.metrics`)         AS last_eval,
+        (SELECT MIN(forecasted_at)
+         FROM `{PROJECT}.elec_ml.predictions`
+         WHERE model_version = (
+             SELECT model_version FROM `{PROJECT}.elec_ml.predictions`
+             ORDER BY forecasted_at DESC LIMIT 1
+         ))                                                                      AS last_train
     """
     return _bq().query(sql).to_dataframe().iloc[0].to_dict()
 
-
-@st.cache_data(ttl=300)
-def load_train_status():
-    """Return the last-updated timestamp of models/latest_run_id in GCS, or None."""
-    if not BUCKET:
-        return None
-    try:
-        from google.cloud import storage as _gcs
-        blob = _gcs.Client(project=PROJECT).bucket(BUCKET).blob("models/latest_run_id")
-        blob.reload()
-        return blob.updated   # tz-aware datetime
-    except Exception:
-        return None
 
 
 @st.cache_data(ttl=300)
@@ -489,7 +482,6 @@ with st.spinner("Loading…"):
     metrics_df = load_metrics()
     n_complete = load_completeness()
     geojson    = load_france_geojson()
-    train_ts   = load_train_status()
 
 # Drop partial timestamps (API lag: not all 12 regions have reported yet)
 _N_REGIONS   = len(REGION_CENTROIDS)
@@ -576,6 +568,7 @@ with col_status:
     features_ts = status.get("last_features")
     forecast_ts = status.get("last_forecast")
     eval_ts     = status.get("last_eval")
+    train_ts    = status.get("last_train")
     st.markdown(
         f'<div style="padding-top:10px; text-align:right;">'
         f'  <div style="font-size:11px; color:#94A3B8; text-transform:uppercase;'

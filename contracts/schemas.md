@@ -34,6 +34,7 @@
 | `date_heure` | TIMESTAMP | 15-min slot (UTC) |
 | `region` | STRING | French metro region name |
 | `consommation_lag_24h` | FLOAT64 | Same slot 24h ago |
+| `consommation_lag_48h` | FLOAT64 | Same slot 48h ago |
 | `consommation_lag_168h` | FLOAT64 | Same slot 7 days ago |
 | `consommation_rolling_168h` | FLOAT64 | 7-day rolling mean |
 | `temperature_celsius` | FLOAT64 | °C |
