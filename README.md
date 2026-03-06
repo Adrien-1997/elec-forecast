@@ -107,6 +107,7 @@ Features are computed in BigQuery SQL (single round-trip) then augmented in Pyth
 |---|---|
 | `region` | French region — encoded as `pd.Categorical` with fixed sorted category list (consistent between train and forecast) |
 | `consommation_lag_24h` | Consumption same time yesterday |
+| `consommation_lag_48h` | Consumption same time 2 days ago |
 | `consommation_lag_168h` | Consumption same time last week |
 | `consommation_rolling_168h` | 7-day rolling average |
 | `temperature_celsius` | Regional temperature at nearest hour |
