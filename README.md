@@ -4,6 +4,7 @@
 ![GCP](https://img.shields.io/badge/GCP-Cloud_Run-4285F4?logo=googlecloud&logoColor=white)
 ![BigQuery](https://img.shields.io/badge/BigQuery-elec__raw%20%7C%20features%20%7C%20ml-4285F4?logo=googlebigquery&logoColor=white)
 ![LightGBM](https://img.shields.io/badge/Model-LightGBM-2980b9)
+![XGBoost](https://img.shields.io/badge/Model-XGBoost-EC6B1A)
 ![MLflow](https://img.shields.io/badge/Tracking-MLflow-0194E2?logo=mlflow&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 [![Live demo](https://img.shields.io/badge/Live_demo-Dashboard-2563EB)](https://elec-dashboard-931951823998.europe-west9.run.app)
@@ -14,13 +15,13 @@ End-to-end ML pipeline for **day-ahead electricity demand forecasting** across 1
 
 ![Dashboard screenshot](assets/dashboard.png)
 
-The dashboard shows four KPI cards (France total predicted MW, 7-day rolling MAE, p95 error, 24h data completeness), a choropleth map of predicted regional demand, and a 24-hour actual vs. predicted time series with a live "now" line.
+The dashboard shows four KPI cards (France total predicted MW, 7-day rolling MAE, p95 error, 24h data completeness), a choropleth map of predicted regional demand, and a 24-hour actual vs. predicted time series with a lag-24h baseline and a live "now" line.
 
 ---
 
 ## Overview
 
-This project forecasts regional electricity consumption in France at 15-minute granularity, 24 hours ahead. The full pipeline runs autonomously on GCP free-tier infrastructure: data is ingested every 15 minutes from two public APIs, features are materialised into BigQuery, a LightGBM model is retrained daily on a rolling 90-day window, and predictions are served through a Streamlit dashboard with live monitoring metrics.
+This project forecasts regional electricity consumption in France at 15-minute granularity, 24 hours ahead. The full pipeline runs autonomously on GCP free-tier infrastructure: data is ingested every 15 minutes from two public APIs, features are materialised into BigQuery, a LightGBM model is retrained daily on a rolling 2-year window, and predictions are served through a Streamlit dashboard with live monitoring metrics.
 
 The goal is a production-grade ML system — not just a notebook — with proper data contracts, experiment tracking, scheduled jobs, monitoring, and a deployment pipeline.
 
@@ -58,7 +59,7 @@ Every 15 min:
 
 Daily (Paris time):
   01:50  →  features — incremental feature store materialisation from raw
-  02:00  →  train    — rolling 90-day window → LightGBM → MLflow + GCS
+  02:00  →  train    — rolling 2-year window → LightGBM → MLflow + GCS
   06:00  →  forecast — eco history lags + Open-Meteo live forecast → 96×12 predictions → BQ
 
 On-demand:
@@ -74,7 +75,7 @@ On-demand:
 | Compute | Cloud Run Jobs (batch) + Cloud Run Services (dashboard) | Scale to zero, no idle cost |
 | Storage | BigQuery (raw, features, predictions) + GCS (model artifacts) | Serverless, free-tier friendly |
 | Orchestration | Cloud Scheduler | Managed cron, no Airflow overhead |
-| ML | LightGBM + scikit-learn | Fast training, strong tabular performance |
+| ML | LightGBM + XGBoost + scikit-learn | Fast training, strong tabular performance; both benchmarked in notebook |
 | Experiment tracking | MLflow self-hosted on Cloud Run | Portable, no vendor lock-in; SQLite on GCS avoids Cloud SQL cost |
 | Dashboard | Streamlit on Cloud Run | Rapid iteration, Python-native |
 | IaC | Terraform | Reproducible GCP provisioning (GCS, BQ, IAM, Scheduler, Secrets) |
@@ -123,9 +124,11 @@ Features are computed in BigQuery SQL (single round-trip) then augmented in Pyth
 
 ## ML Model
 
-- **Algorithm**: LightGBM regressor (gradient boosted trees)
+- **Algorithm**: LightGBM regressor (gradient boosted trees), deployed to production
+- **Benchmarked against**: XGBoost and two naive baselines (lag-24h, lag-168h) — see [`notebooks/modeling.ipynb`](notebooks/modeling.ipynb)
 - **Target**: `consommation` (MW) at each 15-min slot, per region
 - **Horizon**: 24 hours ahead (96 slots × 12 regions = 1,152 predictions per scoring run)
+- **Training window**: rolling 2-year window — captures full annual seasonality cycle
 - **Experiment tracking**: MLflow — each training run logs parameters, metrics (RMSE, MAE), and the model artifact
 - **Artifact storage**: `gs://elec-forecast-931951823998/models/{run_id}/model.lgb`
 - **Model registry**: MLflow tracking DB (SQLite) persisted on GCS, downloaded/uploaded at job boundaries
@@ -137,9 +140,11 @@ Features are computed in BigQuery SQL (single round-trip) then augmented in Pyth
 Live Streamlit dashboard showing:
 
 - **KPI row**: France total predicted MW (next slot), data completeness (24h), rolling 7d MAE, p95/p99 error from `elec_ml.metrics`
-- **Pipeline freshness**: colour-coded badges for ingest/features (20/60 min thresholds) and forecast (26 h threshold for daily job)
-- **Regional map**: folium map of France — circle size and opacity encode predicted demand per region
-- **Time series**: fixed 24h day view (Paris midnight → midnight), actuals fill from left, "now" line moves through day, predictions extend to right; selectable per region or France total
+- **Pipeline freshness**: colour-coded badges for ingest/features (20/60 min thresholds) and forecast/retrain (26 h threshold for daily jobs)
+- **Regional map**: choropleth of France — colour encodes average predicted demand per region over the next 24h
+- **Time series**: fixed 24h day view (Paris midnight → midnight); actuals fill from left, lag-24h baseline (yesterday shifted +24h) and model predictions overlap, orange "now" line moves through the day; selectable per region or France total
+- **MAE by region**: horizontal bar chart (7d rolling), colour-scaled light-to-dark blue by error magnitude
+- **Demand heatmap**: region × hour of day, average predicted MW
 
 ---
 
@@ -179,6 +184,8 @@ elec-forecast/
 │       ├── bigquery.tf / secrets.tf / scheduler.tf
 │       ├── imports.tf             # Import blocks for existing resources
 │       └── schemas/               # BQ table schemas as JSON
+├── notebooks/
+│   └── modeling.ipynb             # LightGBM vs XGBoost vs baselines — skore EstimatorReport + ComparisonReport
 ├── contracts/
 │   ├── schemas.md                 # Human-readable table schemas
 │   └── features.yaml              # Feature registry
@@ -260,12 +267,12 @@ python -m elec_jobs
 |---|---|---|
 | `ingest` | `*/15 * * * *` | Pull new eco2mix records + weather → BQ raw (UPSERT) |
 | `features` | `50 1 * * *` (daily 01:50) | Incremental feature materialisation from raw (lags, rolling avg, calendar) → BQ feature store |
-| `train` | `0 2 * * *` (daily 02:00) | Train LightGBM on rolling 90-day window, log to MLflow, push model to GCS |
+| `train` | `0 2 * * *` (daily 02:00) | Train LightGBM on rolling 2-year window, log to MLflow, push model to GCS |
 | `forecast` | `0 6 * * *` (daily 06:00) | Eco history lags + Open-Meteo live forecast → 96×12 predictions → UPSERT `elec_ml.predictions` |
 | `metrics` | `10,25,40,55 * * * *` | predictions × actuals → rolling 7d MAE/p95/p99 → UPSERT `elec_ml.metrics` |
 | `backfill` | Manual only | Historical eco2mix + weather → BQ raw; use before first train or after a data reset |
 
-Features and train run daily (not weekly) to keep the model fresh; the 90-day rolling window focuses training on recent patterns while covering full seasonal variation.
+Features and train run daily to keep the model fresh; the 2-year rolling window captures full annual seasonality while staying focused on recent consumption patterns.
 
 All jobs share a single Docker image (`Dockerfile.jobs`); the `JOB_MODULE` environment variable selects the entry point. Images are tagged both `:{git-sha}` (audit trail) and `:latest` (stable reference for Cloud Run).
 
@@ -291,10 +298,11 @@ All jobs share a single Docker image (`Dockerfile.jobs`); the `JOB_MODULE` envir
 - [x] Dashboard redesign — contact header, system check badges (Ingest/Features/Forecast/Retrain/Eval), orange "now" line, France-total KPI tooltips
 - [x] Forecast lag alignment fix — inference features aligned to T=slot-24h matching training convention
 - [x] Fixed forecast window — always anchored at 06:00 Paris regardless of job start time
-- [x] Daily retrain pipeline — features 01:50 → train 02:00 → forecast 06:00; rolling 90-day training window
+- [x] Daily retrain pipeline — features 01:50 → train 02:00 → forecast 06:00; rolling 2-year training window
+- [x] Modeling notebook — LightGBM vs XGBoost vs lag baselines with skore `ComparisonReport` (actual vs predicted, residuals, permutation importance)
 - [x] Backfill pipeline — `backfill` job + `scripts/full_pipeline.ps1` for full data reset
 - [x] GitHub → Cloud Build trigger (CI on push to main)
-- [ ] MLflow server on Cloud Run (self-hosted experiment tracking UI)
+- [ ] MLflow server on Cloud Run (SQLite on GCS backend, scales to 0)
 - [ ] Drift monitoring: PSI/KS test on feature distributions, rolling MAE vs baseline
 - [ ] Automated retrain policy: trigger when 7-day MAE exceeds threshold
 - [ ] Data retention: BQ partition expiry (raw 90d, features 30d) + GCS model rotation (keep last 3)

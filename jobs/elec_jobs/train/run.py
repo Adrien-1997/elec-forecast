@@ -1,6 +1,6 @@
 """Train job: feature store → LightGBM → MLflow + GCS artifact.
 
-Schedule: weekly (Sunday 2am) via Cloud Scheduler.
+Schedule: daily 02:00 Paris via Cloud Scheduler.
 
 Strategy:
 - Pull features at T joined with eco2mix target at T+24h (24h-ahead forecast).
@@ -53,7 +53,7 @@ FEATURE_COLS = [
 TARGET_COL = "consommation"
 VAL_FRACTION = 0.2   # last 20% of time range held out for validation
 MIN_ROWS = 200       # safety gate — abort if not enough data after join
-TRAIN_LOOKBACK_DAYS = 90  # rolling training window — keeps model focused on recent patterns
+TRAIN_LOOKBACK_DAYS = 730  # 2-year window — captures full annual seasonality cycle
 
 
 # ─────────────────────────────────────────────────────────────────────────────

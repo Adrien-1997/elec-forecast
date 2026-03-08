@@ -239,10 +239,11 @@ def build_choropleth(forecasts: pd.DataFrame, geojson: dict) -> go.Figure:
 
 
 def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str) -> go.Figure:
-    now_utc       = pd.Timestamp.now(tz="UTC")
-    today_paris   = now_utc.tz_convert("Europe/Paris").normalize()
-    day_start_utc = today_paris.tz_convert("UTC")
-    day_end_utc   = (today_paris + pd.Timedelta(days=1)).tz_convert("UTC")
+    now_utc            = pd.Timestamp.now(tz="UTC")
+    today_paris        = now_utc.tz_convert("Europe/Paris").normalize()
+    day_start_utc      = today_paris.tz_convert("UTC")
+    day_end_utc        = (today_paris + pd.Timedelta(days=1)).tz_convert("UTC")
+    yesterday_start    = day_start_utc - pd.Timedelta(days=1)
 
     if region == FRANCE_TOTAL:
         pred_g = (
@@ -255,6 +256,9 @@ def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str
         )
         px_, py = pred_g["forecast_horizon_dt"], pred_g["predicted_mw"]
         ax, ay  = act_g["date_heure"],           act_g["consommation"]
+        lag_g   = act_g[act_g["date_heure"] >= yesterday_start].copy()
+        lag_g["date_heure"] += pd.Timedelta(hours=24)
+        lx, ly  = lag_g["date_heure"], lag_g["consommation"]
         title   = "France — realized vs predicted"
         y_label = "Total consumption (MW)"
     else:
@@ -262,6 +266,9 @@ def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str
         act_r  = actuals[actuals["region"] == region].sort_values("date_heure")
         px_, py = pred_r["forecast_horizon_dt"], pred_r["predicted_mw"]
         ax, ay  = act_r["date_heure"],           act_r["consommation"]
+        lag_r   = act_r[act_r["date_heure"] >= yesterday_start].copy()
+        lag_r["date_heure"] += pd.Timedelta(hours=24)
+        lx, ly  = lag_r["date_heure"], lag_r["consommation"]
         title   = f"{region} — realized vs predicted"
         y_label = "Consumption (MW)"
 
@@ -273,6 +280,10 @@ def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str
     fig.add_trace(go.Scatter(
         x=px_, y=py, name="Predicted",
         line=dict(color=_C3, width=2, dash="dash"), mode="lines",
+    ))
+    fig.add_trace(go.Scatter(
+        x=lx, y=ly, name="Lag 24h",
+        line=dict(color="#94A3B8", width=1.5, dash="dot"), mode="lines",
     ))
     fig.update_layout(
         **_CANVAS,
@@ -307,9 +318,6 @@ def build_mae_bars(metrics_df: pd.DataFrame) -> go.Figure:
         .dropna(subset=["mae_mw"])
         .sort_values("mae_mw", ascending=True)
     )
-    france     = metrics_df[metrics_df["region"] == "France"]
-    france_mae = france["mae_mw"].iloc[0] if not france.empty else None
-
     fig = go.Figure()
     fig.add_trace(go.Bar(
         x=df["mae_mw"],
@@ -322,14 +330,6 @@ def build_mae_bars(metrics_df: pd.DataFrame) -> go.Figure:
         ),
         hovertemplate="%{y}: <b>%{x:,.0f} MW</b><extra></extra>",
     ))
-    if france_mae is not None:
-        fig.add_vline(
-            x=france_mae,
-            line_dash="dot", line_color="#F97316", line_width=2,
-            annotation_text=f"France avg {france_mae:,.0f} MW",
-            annotation_position="top right",
-            annotation_font=dict(color="#F97316", size=11),
-        )
     fig.update_layout(
         **_CANVAS,
         title=dict(text="MAE by region — 7d rolling", font=dict(size=14, color="#0F172A")),
