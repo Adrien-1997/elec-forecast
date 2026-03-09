@@ -9,9 +9,10 @@ param(
     [string]$Tag       = (git rev-parse --short HEAD)
 )
 
-$ImageBase  = "$Region-docker.pkg.dev/$ProjectId/$Repo/elec-jobs"
-$Image      = "${ImageBase}:latest"
-$DashImage  = "$Region-docker.pkg.dev/$ProjectId/$Repo/elec-dashboard:latest"
+$ImageBase    = "$Region-docker.pkg.dev/$ProjectId/$Repo/elec-jobs"
+$Image        = "${ImageBase}:latest"
+$DashImage    = "$Region-docker.pkg.dev/$ProjectId/$Repo/elec-dashboard:latest"
+$MlflowImage  = "$Region-docker.pkg.dev/$ProjectId/$Repo/elec-mlflow:latest"
 
 # ── Build both images via Cloud Build (no local Docker required) ──────────────
 
@@ -21,9 +22,31 @@ gcloud builds submit . `
     --project $ProjectId `
     --substitutions "_REGION=$Region,_REPO=$Repo,SHORT_SHA=$Tag"
 
+# ── Deploy MLflow UI (Cloud Run Service) ─────────────────────────────────────
+
+Write-Host "==> Deploying Cloud Run Service: elec-mlflow"
+gcloud run deploy elec-mlflow `
+    --image $MlflowImage `
+    --region $Region `
+    --project $ProjectId `
+    --set-secrets "GCS_BUCKET=GCS_BUCKET:latest" `
+    --service-account "elec-forecast-sa@$ProjectId.iam.gserviceaccount.com" `
+    --allow-unauthenticated `
+    --min-instances 0 `
+    --max-instances 1 `
+    --memory 512Mi `
+    --cpu 1 `
+    --port 8080 `
+    --timeout 300
+
+$MlflowUrl = (gcloud run services describe elec-mlflow `
+    --region $Region --project $ProjectId `
+    --format "value(status.url)").Trim()
+Write-Host "==> MLflow URL: $MlflowUrl"
+
 # ── Deploy Cloud Run Jobs ─────────────────────────────────────────────────────
 
-$Jobs = @("ingest", "features", "train", "forecast", "metrics")
+$Jobs = @("ingest", "features", "forecast", "metrics")
 
 foreach ($Job in $Jobs) {
     Write-Host "==> Deploying Cloud Run Job: $Job"
@@ -37,6 +60,18 @@ foreach ($Job in $Jobs) {
         --max-retries 1 `
         --task-timeout 600
 }
+
+# train: also needs MLFLOW_TRACKING_URI
+Write-Host "==> Deploying Cloud Run Job: train"
+gcloud run jobs deploy train `
+    --image $Image `
+    --region $Region `
+    --project $ProjectId `
+    --set-env-vars "JOB_MODULE=train,MLFLOW_TRACKING_URI=$MlflowUrl,MLFLOW_EXPERIMENT_NAME=elec-forecast" `
+    --set-secrets "GCP_PROJECT_ID=GCP_PROJECT_ID:latest,GCS_BUCKET=GCS_BUCKET:latest" `
+    --service-account "elec-forecast-sa@$ProjectId.iam.gserviceaccount.com" `
+    --max-retries 1 `
+    --task-timeout 600
 
 # backfill: long-running one-shot job, no scheduler trigger.
 # Run manually: gcloud run jobs execute backfill --region europe-west9

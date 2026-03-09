@@ -29,6 +29,21 @@ steps:
   - name: gcr.io/cloud-builders/docker
     args: [push, --all-tags, "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-dashboard"]
 
+  # ── MLflow image ─────────────────────────────────────────────────────────────
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-mlflow:${SHORT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-mlflow:latest
+      - -f
+      - apps/mlflow/Dockerfile
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-mlflow"]
+
   # ── Redeploy dashboard Cloud Run service ─────────────────────────────────
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
@@ -49,6 +64,8 @@ images:
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-jobs:latest
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-dashboard:${SHORT_SHA}
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-dashboard:latest
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-mlflow:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-mlflow:latest
 
 substitutions:
   _REGION: europe-west9
