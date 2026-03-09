@@ -14,6 +14,11 @@ $Image        = "${ImageBase}:latest"
 $DashImage    = "$Region-docker.pkg.dev/$ProjectId/$Repo/elec-dashboard:latest"
 $MlflowImage  = "$Region-docker.pkg.dev/$ProjectId/$Repo/elec-mlflow:latest"
 
+# ── Terraform — provision/update infra (MLflow service + IAM bindings) ───────
+
+Write-Host "==> Running terraform apply"
+terraform -chdir=infra/terraform apply -auto-approve
+
 # ── Build both images via Cloud Build (no local Docker required) ──────────────
 
 Write-Host "==> Building images via Cloud Build (tag: $Tag)"
@@ -31,17 +36,15 @@ gcloud run deploy elec-mlflow `
     --project $ProjectId `
     --set-secrets "GCS_BUCKET=GCS_BUCKET:latest" `
     --service-account "elec-forecast-sa@$ProjectId.iam.gserviceaccount.com" `
-    --allow-unauthenticated `
+    --no-allow-unauthenticated `
     --min-instances 0 `
     --max-instances 1 `
-    --memory 512Mi `
+    --memory 1Gi `
     --cpu 1 `
     --port 8080 `
     --timeout 300
 
-$MlflowUrl = (gcloud run services describe elec-mlflow `
-    --region $Region --project $ProjectId `
-    --format "value(status.url)").Trim()
+$MlflowUrl = (terraform -chdir=infra/terraform output -raw mlflow_url).Trim()
 Write-Host "==> MLflow URL: $MlflowUrl"
 
 # ── Deploy Cloud Run Jobs ─────────────────────────────────────────────────────
@@ -61,7 +64,7 @@ foreach ($Job in $Jobs) {
         --task-timeout 600
 }
 
-# train: also needs MLFLOW_TRACKING_URI
+# train: needs more memory (650k rows + LightGBM) and MLFLOW_TRACKING_URI
 Write-Host "==> Deploying Cloud Run Job: train"
 gcloud run jobs deploy train `
     --image $Image `
@@ -70,6 +73,8 @@ gcloud run jobs deploy train `
     --set-env-vars "JOB_MODULE=train,MLFLOW_TRACKING_URI=$MlflowUrl,MLFLOW_EXPERIMENT_NAME=elec-forecast" `
     --set-secrets "GCP_PROJECT_ID=GCP_PROJECT_ID:latest,GCS_BUCKET=GCS_BUCKET:latest" `
     --service-account "elec-forecast-sa@$ProjectId.iam.gserviceaccount.com" `
+    --memory 4Gi `
+    --cpu 2 `
     --max-retries 1 `
     --task-timeout 600
 

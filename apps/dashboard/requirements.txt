@@ -2,6 +2,7 @@ streamlit>=1.32
 requests>=2.31
 plotly>=5.20
 google-cloud-bigquery>=3.17
+google-cloud-storage>=2.14
 pyarrow>=14
 db-dtypes>=1.2
 pandas>=2.1

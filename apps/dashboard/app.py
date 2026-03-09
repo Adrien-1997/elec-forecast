@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from dotenv import load_dotenv
-from google.cloud import bigquery
+from google.cloud import bigquery, storage
 
 load_dotenv()
 
@@ -97,15 +97,22 @@ def load_system_status() -> dict:
         (SELECT MAX(_ingested_at)     FROM `{PROJECT}.elec_raw.eco2mix`)        AS last_ingest,
         (SELECT MAX(_materialized_at) FROM `{PROJECT}.elec_features.features`)  AS last_features,
         (SELECT MAX(forecasted_at)    FROM `{PROJECT}.elec_ml.predictions`)     AS last_forecast,
-        (SELECT MAX(_computed_at)     FROM `{PROJECT}.elec_ml.metrics`)         AS last_eval,
-        (SELECT MIN(forecasted_at)
-         FROM `{PROJECT}.elec_ml.predictions`
-         WHERE model_version = (
-             SELECT model_version FROM `{PROJECT}.elec_ml.predictions`
-             ORDER BY forecasted_at DESC LIMIT 1
-         ))                                                                      AS last_train
+        (SELECT MAX(_computed_at)     FROM `{PROJECT}.elec_ml.metrics`)         AS last_eval
     """
     return _bq().query(sql).to_dataframe().iloc[0].to_dict()
+
+
+@st.cache_data(ttl=300)
+def load_last_trained_at():
+    """Read models/latest_run_id blob updated timestamp from GCS — set by the train job."""
+    if not BUCKET:
+        return None
+    try:
+        blob = storage.Client(project=PROJECT).bucket(BUCKET).blob("models/latest_run_id")
+        blob.reload()
+        return blob.updated  # timezone-aware datetime
+    except Exception:
+        return None
 
 
 
@@ -196,7 +203,8 @@ def _fmt_mw(v, suffix=" MW") -> str:
 
 _AXIS = dict(
     showgrid=True, gridcolor="#E2E8F0", zeroline=False,
-    showline=True, linecolor="#CBD5E1",
+    showline=True, linecolor="#CBD5E1", mirror=True,
+    ticks="outside", tickcolor="#CBD5E1",
     tickfont=dict(color="#475569", size=11),
 )
 _CANVAS = dict(plot_bgcolor="white", paper_bgcolor="white")
@@ -232,7 +240,7 @@ def build_choropleth(forecasts: pd.DataFrame, geojson: dict) -> go.Figure:
         mapbox_style="carto-positron",
         mapbox_zoom=4.5,
         mapbox_center={"lat": 46.5, "lon": 2.5},
-        margin=dict(l=0, r=0, t=44, b=0),
+        margin=dict(l=0, r=70, t=44, b=0),
         height=490,
     )
     return fig
@@ -240,10 +248,9 @@ def build_choropleth(forecasts: pd.DataFrame, geojson: dict) -> go.Figure:
 
 def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str) -> go.Figure:
     now_utc            = pd.Timestamp.now(tz="UTC")
-    today_paris        = now_utc.tz_convert("Europe/Paris").normalize()
-    day_start_utc      = today_paris.tz_convert("UTC")
-    day_end_utc        = (today_paris + pd.Timedelta(days=1)).tz_convert("UTC")
-    yesterday_start    = day_start_utc - pd.Timedelta(days=1)
+    day_start_utc      = now_utc.normalize()                          # 00:00 UTC today
+    day_end_utc        = day_start_utc + pd.Timedelta(days=1)         # 00:00 UTC tomorrow
+    yesterday_start    = day_start_utc - pd.Timedelta(days=1)         # 00:00 UTC yesterday
 
     if region == FRANCE_TOTAL:
         pred_g = (
@@ -288,7 +295,7 @@ def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str
     fig.update_layout(
         **_CANVAS,
         title=dict(text=title, font=dict(size=14, color="#0F172A")),
-        xaxis=dict(**_AXIS, range=[day_start_utc, day_end_utc], title=None),
+        xaxis=dict(**_AXIS, range=[day_start_utc, day_end_utc], title="Time (UTC)"),
         yaxis=dict(**_AXIS, title=y_label, title_font=dict(color="#475569")),
         shapes=[{
             "type": "line", "xref": "x", "yref": "paper",
@@ -306,7 +313,7 @@ def build_timeseries(forecasts: pd.DataFrame, actuals: pd.DataFrame, region: str
             bgcolor="white", bordercolor="#E2E8F0", borderwidth=1,
             font=dict(size=12, color="#0F172A"),
         ),
-        margin=dict(l=0, r=0, t=44, b=0),
+        margin=dict(l=0, r=10, t=44, b=40),
         height=420,
     )
     return fig
@@ -335,7 +342,7 @@ def build_mae_bars(metrics_df: pd.DataFrame) -> go.Figure:
         title=dict(text="MAE by region — 7d rolling", font=dict(size=14, color="#0F172A")),
         xaxis=dict(**_AXIS, title="MAE (MW)"),
         yaxis={**_AXIS, "showgrid": False},
-        margin=dict(l=0, r=20, t=44, b=0),
+        margin=dict(l=0, r=60, t=44, b=30),
         height=400,
     )
     return fig
@@ -386,7 +393,7 @@ def build_heatmap(forecasts: pd.DataFrame) -> go.Figure:
         title=dict(text="Demand heatmap — region × hour (Paris time)", font=dict(size=14, color="#0F172A")),
         xaxis=dict(tickfont=dict(color="#475569", size=10), showline=True, linecolor="#CBD5E1", tickangle=0),
         yaxis=dict(tickfont=dict(color="#475569", size=11), showline=True, linecolor="#CBD5E1", autorange="reversed"),
-        margin=dict(l=0, r=0, t=44, b=40),
+        margin=dict(l=0, r=70, t=44, b=40),
         height=400,
     )
     return fig
@@ -452,7 +459,7 @@ st.markdown("""
 [data-testid="stPlotlyChart"] {
     border: 1px solid #E2E8F0;
     border-radius: 12px;
-    padding: 12px 12px 4px;
+    padding: 12px 16px 16px;
     background: #fff;
     box-shadow: 0 1px 6px rgba(15,23,42,.06);
     overflow: hidden;
@@ -476,12 +483,13 @@ st.markdown("""
 # ─────────────────────────────────────────────────────────────────────────────
 
 with st.spinner("Loading…"):
-    forecasts  = load_latest_forecasts()
-    actuals    = load_actuals(hours=48)
-    status     = load_system_status()
-    metrics_df = load_metrics()
-    n_complete = load_completeness()
-    geojson    = load_france_geojson()
+    forecasts    = load_latest_forecasts()
+    actuals      = load_actuals(hours=48)
+    status       = load_system_status()
+    metrics_df   = load_metrics()
+    n_complete   = load_completeness()
+    geojson      = load_france_geojson()
+    last_trained = load_last_trained_at()
 
 # Drop partial timestamps (API lag: not all 12 regions have reported yet)
 _N_REGIONS   = len(REGION_CENTROIDS)
@@ -529,6 +537,13 @@ _ICON_MAIL = (
     '<path d="M2 7l10 7 10-7"/>'
     '</svg>'
 )
+_ICON_MLFLOW = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1F77B4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M9 3h6v11l3.7 6.5A1 1 0 0117.8 22H6.2a1 1 0 01-.9-1.5L9 14V3z"/>'
+    '<line x1="6.5" y1="3" x2="17.5" y2="3"/>'
+    '<line x1="7" y1="14" x2="17" y2="14"/>'
+    '</svg>'
+)
 _ICON_PIN = (
     '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
     '<path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>'
@@ -559,6 +574,9 @@ with col_title:
         f'<a href="https://github.com/Adrien-1997/elec-forecast" target="_blank"'
         f'   style="display:inline-flex; align-items:center; gap:4px; color:#0F172A; text-decoration:none; font-size:13px; font-weight:500;">'
         f'  {_ICON_GH}&nbsp;GitHub</a>'
+        f'<a href="https://elec-mlflow-931951823998.europe-west9.run.app/" target="_blank"'
+        f'   style="display:inline-flex; align-items:center; gap:4px; color:#1F77B4; text-decoration:none; font-size:13px; font-weight:500;">'
+        f'  {_ICON_MLFLOW}&nbsp;MLflow</a>'
         f'</div>',
         unsafe_allow_html=True,
     )
@@ -568,7 +586,7 @@ with col_status:
     features_ts = status.get("last_features")
     forecast_ts = status.get("last_forecast")
     eval_ts     = status.get("last_eval")
-    train_ts    = status.get("last_train")
+    train_ts    = last_trained
     st.markdown(
         f'<div style="padding-top:10px; text-align:right;">'
         f'  <div style="font-size:11px; color:#94A3B8; text-transform:uppercase;'

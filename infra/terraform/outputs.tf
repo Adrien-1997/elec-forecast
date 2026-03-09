@@ -17,3 +17,8 @@ output "jobs_image" {
   description = "Full image path for the jobs Docker image"
   value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.docker.repository_id}/elec-jobs:latest"
 }
+
+output "mlflow_url" {
+  description = "MLflow UI Cloud Run service URL"
+  value       = google_cloud_run_v2_service.mlflow.uri
+}

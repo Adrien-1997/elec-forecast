@@ -52,4 +52,5 @@ exec mlflow server \
     --backend-store-uri "sqlite:////tmp/mlflow.db" \
     --default-artifact-root "gs://${GCS_BUCKET}/mlflow/artifacts" \
     --host 0.0.0.0 \
-    --port "${PORT:-8080}"
+    --port "${PORT:-8080}" \
+    --workers 2

@@ -6,7 +6,8 @@ Strategy:
 - Pull features at T joined with eco2mix target at T+24h (24h-ahead forecast).
 - Drop rows where lag features are NULL (insufficient history).
 - Time-based split: last 20% of time range → validation set.
-- Log params, metrics, and model artifact to MLflow.
+- Log params, metrics, and model artifact to MLflow (best-effort — training
+  continues and model is saved to GCS even if MLflow is unavailable).
 - Upload .lgb file to GCS at models/{run_id}/model.lgb.
 
 MLflow tracking URI:
@@ -16,6 +17,8 @@ MLflow tracking URI:
 
 import logging
 import tempfile
+import uuid
+from contextlib import contextmanager
 from datetime import timezone
 from pathlib import Path
 
@@ -151,6 +154,27 @@ def _write_latest_run_id(run_id: str) -> None:
     LOG.info("train: pointer models/latest_run_id → %s", run_id)
 
 
+@contextmanager
+def _mlflow_run():
+    """Start an MLflow run, or yield a stub run_id if MLflow is unavailable.
+
+    Yields (run_id, mlflow_active). Training always completes; MLflow is best-effort.
+    Short HTTP timeout (10 s, 2 retries) so the fallback is fast on cold-start 503s.
+    """
+    import os
+    os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "10")
+    os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "2")
+    try:
+        mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
+        mlflow.set_experiment(config.MLFLOW_EXPERIMENT_NAME)
+        with mlflow.start_run() as run:
+            LOG.info("train: MLflow run_id=%s", run.info.run_id)
+            yield run.info.run_id, True
+    except Exception as exc:
+        LOG.warning("train: MLflow unavailable (%s) — training without experiment tracking", exc)
+        yield uuid.uuid4().hex, False
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────────────────────
@@ -167,24 +191,19 @@ def main() -> None:
     train_df, val_df = _split(df)
     LOG.info("train: %d train rows / %d val rows", len(train_df), len(val_df))
 
-    mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
-    mlflow.set_experiment(config.MLFLOW_EXPERIMENT_NAME)
-
-    with mlflow.start_run() as run:
-        run_id = run.info.run_id
-        LOG.info("train: MLflow run_id=%s", run_id)
-
+    with _mlflow_run() as (run_id, mlflow_active):
         booster, metrics = _train(train_df, val_df)
 
-        mlflow.log_params({
-            "n_train":        len(train_df),
-            "n_val":          len(val_df),
-            "val_fraction":   VAL_FRACTION,
-            "features":       FEATURE_COLS,
-            "n_features":     len(FEATURE_COLS),
-            "best_iteration": booster.best_iteration,
-        })
-        mlflow.log_metrics(metrics)
+        if mlflow_active:
+            mlflow.log_params({
+                "n_train":        len(train_df),
+                "n_val":          len(val_df),
+                "val_fraction":   VAL_FRACTION,
+                "features":       FEATURE_COLS,
+                "n_features":     len(FEATURE_COLS),
+                "best_iteration": booster.best_iteration,
+            })
+            mlflow.log_metrics(metrics)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             model_path = Path(tmpdir) / "model.lgb"
@@ -194,11 +213,12 @@ def main() -> None:
             gcs.upload(model_path, blob_name)
             LOG.info("train: uploaded gs://%s/%s", config.GCS_BUCKET, blob_name)
 
-            mlflow.log_artifact(str(model_path), artifact_path="model")
+            if mlflow_active:
+                mlflow.log_artifact(str(model_path), artifact_path="model")
 
-        # Write pointer so score job always knows which model to load
         _write_latest_run_id(run_id)
-        mlflow.set_tag("gcs_model_blob", blob_name)
+        if mlflow_active:
+            mlflow.set_tag("gcs_model_blob", blob_name)
 
     LOG.info("train: done — run_id=%s  val_mae=%.1f MW", run_id, metrics["val_mae_mw"])
 

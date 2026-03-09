@@ -171,12 +171,12 @@ elec-forecast/
 │   │   ├── app.py                 # Streamlit dashboard
 │   │   ├── requirements.txt
 │   │   └── Dockerfile
-│   └── mlflow/                    # Self-hosted MLflow server (WIP)
+│   └── mlflow/                    # Self-hosted MLflow server (Cloud Run, SQLite↔GCS)
 ├── infra/
 │   ├── cloudrun/
 │   │   ├── Dockerfile.jobs        # Single image for all 6 jobs
-│   │   ├── cloudbuild.yaml        # Cloud Build — builds images tagged :{SHA} + :latest
-│   │   └── deploy.ps1             # Build + deploy all Cloud Run Jobs + dashboard
+│   │   ├── cloudbuild.yaml        # Cloud Build — builds elec-jobs + elec-mlflow + elec-dashboard images
+│   │   └── deploy.ps1             # Build + deploy all Cloud Run Jobs + MLflow service + dashboard
 │   ├── sql/ddl/                   # BigQuery DDL (reference; Terraform is authoritative)
 │   └── terraform/                 # All GCP resources — single source of truth
 │       ├── main.tf                # Provider + GCS backend
@@ -302,7 +302,7 @@ All jobs share a single Docker image (`Dockerfile.jobs`); the `JOB_MODULE` envir
 - [x] Modeling notebook — LightGBM vs XGBoost vs lag baselines with skore `ComparisonReport` (actual vs predicted, residuals, permutation importance)
 - [x] Backfill pipeline — `backfill` job + `scripts/full_pipeline.ps1` for full data reset
 - [x] GitHub → Cloud Build trigger (CI on push to main)
-- [ ] MLflow server on Cloud Run (SQLite on GCS backend, scales to 0)
+- [x] MLflow server on Cloud Run (SQLite↔GCS sync, auth-protected, scales to 0)
 - [ ] Drift monitoring: PSI/KS test on feature distributions, rolling MAE vs baseline
 - [ ] Automated retrain policy: trigger when 7-day MAE exceeds threshold
 - [ ] Data retention: BQ partition expiry (raw 90d, features 30d) + GCS model rotation (keep last 3)
