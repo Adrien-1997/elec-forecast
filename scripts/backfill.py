@@ -1,10 +1,7 @@
-"""Backfill job: historical eco2mix + weather → BQ raw tables.
+"""Backfill script: historical eco2mix + weather → BQ raw tables.
 
-Run once (or on-demand) to populate BQ with 2 years of historical data before training.
-No scheduled trigger — execute manually:
-
-  Local:     $env:JOB_MODULE = "backfill"; python -m elec_jobs
-  Cloud Run: gcloud run jobs execute backfill --region europe-west9
+One-shot utility to populate BQ with historical data before initial training.
+Not deployed as a Cloud Run Job — run locally with the venv activated.
 
 Strategy:
 - eco2mix: paginate the chosen ODRÉ dataset in monthly per-region batches
@@ -15,7 +12,11 @@ Strategy:
 
 Dataset choice:
   eco2mix-regional-cons-def  consolidated/definitive — covers up to ~end of previous year
-  eco2mix-regional-tr        real-time — covers recent months (2025 +)
+  eco2mix-regional-tr        real-time — covers recent months (2025+)
+
+Usage:
+  # From repo root, with venv activated:
+  python scripts/backfill.py
 
 Env vars:
   BACKFILL_START_DATE  YYYY-MM-DD  default: 2 years ago

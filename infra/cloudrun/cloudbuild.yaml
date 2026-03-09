@@ -59,6 +59,21 @@ steps:
       - ${PROJECT_ID}
       - --quiet
 
+  # ── Redeploy MLflow Cloud Run service ────────────────────────────────────
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - elec-mlflow
+      - --image
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-mlflow:${SHORT_SHA}
+      - --region
+      - ${_REGION}
+      - --project
+      - ${PROJECT_ID}
+      - --quiet
+
 images:
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-jobs:${SHORT_SHA}
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-jobs:latest

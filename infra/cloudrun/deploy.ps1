@@ -49,7 +49,7 @@ Write-Host "==> MLflow URL: $MlflowUrl"
 
 # ── Deploy Cloud Run Jobs ─────────────────────────────────────────────────────
 
-$Jobs = @("ingest", "features", "forecast", "metrics")
+$Jobs = @("ingest", "features", "forecast", "metrics", "reingest")
 
 foreach ($Job in $Jobs) {
     Write-Host "==> Deploying Cloud Run Job: $Job"
@@ -78,20 +78,6 @@ gcloud run jobs deploy train `
     --max-retries 1 `
     --task-timeout 600
 
-# backfill: long-running one-shot job, no scheduler trigger.
-# Run manually: gcloud run jobs execute backfill --region europe-west9
-# With custom range: gcloud run jobs execute backfill --region europe-west9 `
-#   --update-env-vars BACKFILL_START_DATE=2024-01-01,BACKFILL_END_DATE=2025-12-31
-Write-Host "==> Deploying Cloud Run Job: backfill"
-gcloud run jobs deploy backfill `
-    --image $Image `
-    --region $Region `
-    --project $ProjectId `
-    --set-env-vars "JOB_MODULE=backfill" `
-    --set-secrets "GCP_PROJECT_ID=GCP_PROJECT_ID:latest,GCS_BUCKET=GCS_BUCKET:latest" `
-    --service-account "elec-forecast-sa@$ProjectId.iam.gserviceaccount.com" `
-    --max-retries 0 `
-    --task-timeout 7200
 
 # ── Deploy Dashboard (Cloud Run Service — always-on HTTP) ─────────────────────
 

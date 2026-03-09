@@ -23,20 +23,18 @@ if ($LASTEXITCODE -ne 0) { throw "Step 1 failed" }
 
 # ── 2. Backfill 2024 (consolidated dataset) ───────────────────────────────────
 Step 2 "Backfill eco2mix 2024-01-01 → 2024-12-31 (eco2mix-regional-cons-def)"
-$env:JOB_MODULE          = "backfill"
 $env:BACKFILL_START_DATE = "2024-01-01"
 $env:BACKFILL_END_DATE   = "2024-12-31"
 $env:BACKFILL_DATASET    = "eco2mix-regional-cons-def"
-python -m elec_jobs
+python scripts/backfill.py
 if ($LASTEXITCODE -ne 0) { throw "Step 2 failed" }
 
 # ── 3. Backfill 2025+ (real-time dataset) ─────────────────────────────────────
 Step 3 "Backfill eco2mix 2025-01-01 → today (eco2mix-regional-tr)"
-$env:JOB_MODULE          = "backfill"
 $env:BACKFILL_START_DATE = "2025-01-01"
 $env:BACKFILL_END_DATE   = (Get-Date -Format "yyyy-MM-dd")
 $env:BACKFILL_DATASET    = "eco2mix-regional-tr"
-python -m elec_jobs
+python scripts/backfill.py
 if ($LASTEXITCODE -ne 0) { throw "Step 3 failed" }
 
 # ── 4. Compute features ───────────────────────────────────────────────────────

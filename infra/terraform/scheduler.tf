@@ -1,6 +1,7 @@
 locals {
   scheduler_jobs = {
     ingest   = { schedule = "*/15 * * * *" }
+    reingest = { schedule = "30 1 * * *" }   # Daily 01:30 Paris — refresh last 7d before features+train
     features = { schedule = "50 1 * * *" }   # Daily 01:50 Paris — 10 min before train
     train    = { schedule = "0 2 * * *" }    # Daily 02:00 Paris
     forecast = { schedule = "0 6 * * *" }

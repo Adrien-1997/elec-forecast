@@ -58,6 +58,7 @@ Every 15 min:
           +10 min  →  metrics  — rolling 7d MAE/p95/p99 → BQ elec_ml.metrics
 
 Daily (Paris time):
+  01:30  →  reingest — re-fetch last 7d eco2mix + archive weather → UPSERT raw (late corrections)
   01:50  →  features — incremental feature store materialisation from raw
   02:00  →  train    — rolling 2-year window → LightGBM → MLflow + GCS
   06:00  →  forecast — eco history lags + Open-Meteo live forecast → 96×12 predictions → BQ
@@ -159,7 +160,7 @@ elec-forecast/
 │   │   ├── train/run.py           # features → LightGBM + MLflow + GCS
 │   │   ├── forecast/run.py        # daily: eco lags + Open-Meteo live → 96×12 predictions → BQ
 │   │   ├── metrics/run.py         # rolling 7d MAE/p95/p99 → BQ elec_ml.metrics
-│   │   ├── backfill/run.py        # historical eco2mix + weather → BQ raw (manual, no trigger)
+│   │   ├── reingest/run.py        # daily: re-fetch last 7d eco2mix + archive weather → UPSERT raw
 │   │   ├── shared/
 │   │   │   ├── config.py          # env-based config + region centroids
 │   │   │   ├── bq.py              # BQ client + merge_to_bq (UPSERT helper)
@@ -175,7 +176,7 @@ elec-forecast/
 ├── infra/
 │   ├── cloudrun/
 │   │   ├── Dockerfile.jobs        # Single image for all 6 jobs
-│   │   ├── cloudbuild.yaml        # Cloud Build — builds elec-jobs + elec-mlflow + elec-dashboard images
+│   │   ├── cloudbuild.yaml        # Cloud Build — builds + deploys elec-jobs, elec-mlflow, elec-dashboard
 │   │   └── deploy.ps1             # Build + deploy all Cloud Run Jobs + MLflow service + dashboard
 │   ├── sql/ddl/                   # BigQuery DDL (reference; Terraform is authoritative)
 │   └── terraform/                 # All GCP resources — single source of truth
@@ -255,7 +256,7 @@ Builds Docker images via Cloud Build and deploys 6 Cloud Run Jobs + dashboard Se
 
 ```powershell
 # Activate venv and set env vars
-$env:JOB_MODULE = "ingest"   # or features / train / forecast / metrics / backfill
+$env:JOB_MODULE = "ingest"   # or features / train / forecast / metrics / reingest
 python -m elec_jobs
 ```
 
@@ -268,9 +269,10 @@ python -m elec_jobs
 | `ingest` | `*/15 * * * *` | Pull new eco2mix records + weather → BQ raw (UPSERT) |
 | `features` | `50 1 * * *` (daily 01:50) | Incremental feature materialisation from raw (lags, rolling avg, calendar) → BQ feature store |
 | `train` | `0 2 * * *` (daily 02:00) | Train LightGBM on rolling 2-year window, log to MLflow, push model to GCS |
+| `reingest` | `30 1 * * *` (daily 01:30) | Re-fetch last 7d eco2mix + archive weather → UPSERT raw (late data corrections) |
 | `forecast` | `0 6 * * *` (daily 06:00) | Eco history lags + Open-Meteo live forecast → 96×12 predictions → UPSERT `elec_ml.predictions` |
 | `metrics` | `10,25,40,55 * * * *` | predictions × actuals → rolling 7d MAE/p95/p99 → UPSERT `elec_ml.metrics` |
-| `backfill` | Manual only | Historical eco2mix + weather → BQ raw; use before first train or after a data reset |
+| `backfill` | Manual only (`scripts/backfill.py`) | Historical eco2mix + weather → BQ raw; use before first train or after a data reset |
 
 Features and train run daily to keep the model fresh; the 2-year rolling window captures full annual seasonality while staying focused on recent consumption patterns.
 
@@ -300,8 +302,9 @@ All jobs share a single Docker image (`Dockerfile.jobs`); the `JOB_MODULE` envir
 - [x] Fixed forecast window — always anchored at 06:00 Paris regardless of job start time
 - [x] Daily retrain pipeline — features 01:50 → train 02:00 → forecast 06:00; rolling 2-year training window
 - [x] Modeling notebook — LightGBM vs XGBoost vs lag baselines with skore `ComparisonReport` (actual vs predicted, residuals, permutation importance)
-- [x] Backfill pipeline — `backfill` job + `scripts/full_pipeline.ps1` for full data reset
-- [x] GitHub → Cloud Build trigger (CI on push to main)
+- [x] Backfill pipeline — `scripts/backfill.py` + `scripts/full_pipeline.ps1` for full data reset
+- [x] `reingest` job — daily 01:30 Paris, re-fetches last 7d eco2mix + archive weather before features + train
+- [x] GitHub → Cloud Build trigger (CI on push to main — builds + deploys jobs, dashboard, MLflow)
 - [x] MLflow server on Cloud Run (SQLite↔GCS sync, auth-protected, scales to 0)
 - [ ] Drift monitoring: PSI/KS test on feature distributions, rolling MAE vs baseline
 - [ ] Automated retrain policy: trigger when 7-day MAE exceeds threshold
