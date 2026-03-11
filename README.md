@@ -136,9 +136,13 @@ Features are computed in BigQuery SQL (single round-trip) then augmented in Pyth
 
 ---
 
-## Dashboard
+## Dashboard & MLflow
 
-Live Streamlit dashboard showing:
+### Streamlit dashboard
+
+Live at: [elec-dashboard-931951823998.europe-west9.run.app](https://elec-dashboard-931951823998.europe-west9.run.app) (public)
+
+Shows:
 
 - **KPI row**: France total predicted MW (next slot), data completeness (24h), rolling 7d MAE, p95/p99 error from `elec_ml.metrics`
 - **Pipeline freshness**: colour-coded badges for ingest/features (20/60 min thresholds) and forecast/retrain (26 h threshold for daily jobs)
@@ -146,6 +150,17 @@ Live Streamlit dashboard showing:
 - **Time series**: fixed 24h day view (Paris midnight → midnight); actuals fill from left, lag-24h baseline (yesterday shifted +24h) and model predictions overlap, orange "now" line moves through the day; selectable per region or France total
 - **MAE by region**: horizontal bar chart (7d rolling), colour-scaled light-to-dark blue by error magnitude
 - **Demand heatmap**: region × hour of day, average predicted MW
+
+### MLflow UI
+
+Auth-protected (Google identity required). Access via the Cloud Run proxy — no public exposure:
+
+```powershell
+gcloud run services proxy elec-mlflow --region europe-west9 --port 8080
+# then open http://localhost:8080
+```
+
+> First run requires the `cloud-run-proxy` component: `gcloud components install cloud-run-proxy` (needs admin shell).
 
 ---
 
