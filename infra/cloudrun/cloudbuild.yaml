@@ -44,7 +44,21 @@ steps:
   - name: gcr.io/cloud-builders/docker
     args: [push, --all-tags, "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-mlflow"]
 
-  # ── Redeploy dashboard Cloud Run service ─────────────────────────────────
+  # ── Redeploy Cloud Run Jobs ──────────────────────────────────────────────────
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        for JOB in ingest features forecast metrics reingest train; do
+          gcloud run jobs update $$JOB \
+            --image ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-jobs:${SHORT_SHA} \
+            --region ${_REGION} \
+            --project ${PROJECT_ID} \
+            --quiet
+        done
+
+  # ── Redeploy Cloud Run Services ──────────────────────────────────────────────
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
@@ -59,7 +73,6 @@ steps:
       - ${PROJECT_ID}
       - --quiet
 
-  # ── Redeploy MLflow Cloud Run service ────────────────────────────────────
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:

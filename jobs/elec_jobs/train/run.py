@@ -154,18 +154,44 @@ def _write_latest_run_id(run_id: str) -> None:
     LOG.info("train: pointer models/latest_run_id → %s", run_id)
 
 
+def _fetch_identity_token(audience: str) -> str | None:
+    """Fetch an OIDC identity token from the GCP metadata server.
+
+    Used for Cloud Run → Cloud Run authenticated calls. Returns None outside GCP.
+    """
+    import urllib.request
+    url = (
+        "http://metadata.google.internal/computeMetadata/v1/instance"
+        f"/service-accounts/default/identity?audience={audience}"
+    )
+    try:
+        req = urllib.request.Request(url, headers={"Metadata-Flavor": "Google"})
+        return urllib.request.urlopen(req, timeout=2).read().decode()
+    except Exception:
+        return None
+
+
 @contextmanager
 def _mlflow_run():
     """Start an MLflow run, or yield a stub run_id if MLflow is unavailable.
 
     Yields (run_id, mlflow_active). Training always completes; MLflow is best-effort.
     Short HTTP timeout (10 s, 2 retries) so the fallback is fast on cold-start 503s.
+    For Cloud Run → Cloud Run auth: fetches an OIDC identity token from the metadata
+    server and sets MLFLOW_TRACKING_TOKEN (Bearer auth expected by Cloud Run IAM).
     """
     import os
     os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "10")
     os.environ.setdefault("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "2")
+    tracking_uri = config.MLFLOW_TRACKING_URI
+    # Inject identity token when pointing at a remote (non-file) MLflow server.
+    if not tracking_uri.startswith("file:") and "MLFLOW_TRACKING_TOKEN" not in os.environ:
+        token = _fetch_identity_token(tracking_uri)
+        if token:
+            os.environ["MLFLOW_TRACKING_TOKEN"] = token
+            LOG.info("train: injected GCP identity token for MLflow auth")
     try:
-        mlflow.set_tracking_uri(config.MLFLOW_TRACKING_URI)
+        mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment(config.MLFLOW_EXPERIMENT_NAME)
         with mlflow.start_run() as run:
             LOG.info("train: MLflow run_id=%s", run.info.run_id)
