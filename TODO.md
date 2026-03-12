@@ -33,6 +33,7 @@
 - [x] Verified all 6 Cloud Run jobs execute successfully (incl. backfill)
 - [x] Connect Cloud Build to GitHub repo (trigger on push to main)
 - [x] Commit + push all current fixes (forecast lag alignment, daily schedule, 90d lookback, dashboard v2)
+- [x] Post-deploy smoke tests in `cloudbuild.yaml` — dashboard health, eco2mix freshness (2h), GCS model pointer, predictions freshness (2d)
 
 ## Data pipeline operations
 - [x] **Backfill**: `backfill/run.py` job — eco2mix-regional-cons-def (2024) + eco2mix-regional-tr (2025+); `scripts/full_pipeline.ps1` orchestrates full reset
@@ -59,6 +60,6 @@
 - [x] **GCS mlflow/**: SQLite DB stays; matching artifact subdirs pruned alongside models
 
 ## Tests & quality
-- [ ] Unit tests `ingest` (mock ODRÉ API)
-- [ ] Unit tests `features` (lag/rolling computation)
-- [ ] Linter: `ruff check jobs/`
+- [x] Unit tests `ingest` — 7 tests for `fetch_eco2mix` (pagination, field mapping, UTC normalisation, empty response)
+- [x] Unit tests `features` — 10 tests for `_add_holiday_flag` (French holidays) + `_build_features_sql` (timestamps, lookback, leak guard)
+- [x] Linter: `ruff check jobs/` — E/F/W/I, E501 ignored (SQL strings); run: `python -m pytest jobs/tests/ -v && python -m ruff check jobs/`

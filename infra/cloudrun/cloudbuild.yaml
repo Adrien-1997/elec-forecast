@@ -87,6 +87,60 @@ steps:
       - ${PROJECT_ID}
       - --quiet
 
+  # ── Post-deploy smoke tests ──────────────────────────────────────────────────
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        FAIL=0
+
+        # 1. Dashboard HTTP health (Streamlit /_stcore/health → "ok")
+        echo "==> dashboard health"
+        if curl -sf --max-time 15 ${_DASHBOARD_URL}/_stcore/health; then
+          echo " OK"
+        else
+          echo " FAIL: dashboard unreachable"
+          FAIL=$((FAIL+1))
+        fi
+
+        # 2. eco2mix freshness — ingest healthy if BQ has data < 2h old
+        echo "==> eco2mix freshness (last 2h)"
+        N=$(bq --project_id=${PROJECT_ID} query --nouse_legacy_sql --format=csv --quiet \
+          "SELECT COUNT(*) FROM \`${PROJECT_ID}.elec_raw.eco2mix\` WHERE date_heure > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 2 HOUR)" \
+          | tail -1 | tr -d '[:space:]')
+        if [ "$${N:-0}" -gt 0 ]; then
+          echo " OK (n=$${N})"
+        else
+          echo " FAIL: no eco2mix rows in last 2h"
+          FAIL=$((FAIL+1))
+        fi
+
+        # 3. GCS model pointer written by train job
+        echo "==> GCS model artifact"
+        if gsutil -q stat gs://${_BUCKET}/models/latest_run_id; then
+          echo " OK"
+        else
+          echo " FAIL: models/latest_run_id missing"
+          FAIL=$((FAIL+1))
+        fi
+
+        # 4. Predictions exist (today or yesterday — forecast runs at 06:00 Paris)
+        echo "==> predictions freshness (last 2 days)"
+        P=$(bq --project_id=${PROJECT_ID} query --nouse_legacy_sql --format=csv --quiet \
+          "SELECT COUNT(*) FROM \`${PROJECT_ID}.elec_ml.predictions\` WHERE forecast_date >= DATE_SUB(CURRENT_DATE('Europe/Paris'), INTERVAL 1 DAY)" \
+          | tail -1 | tr -d '[:space:]')
+        if [ "$${P:-0}" -gt 0 ]; then
+          echo " OK (n=$${P})"
+        else
+          echo " FAIL: no recent predictions"
+          FAIL=$((FAIL+1))
+        fi
+
+        echo "--- smoke: $${FAIL} failure(s) ---"
+        exit $${FAIL}
+
 images:
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-jobs:${SHORT_SHA}
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/elec-jobs:latest
@@ -98,6 +152,8 @@ images:
 substitutions:
   _REGION: europe-west9
   _REPO: elec-forecast
+  _BUCKET: elec-forecast-931951823998
+  _DASHBOARD_URL: https://elec-dashboard-931951823998.europe-west9.run.app
 
 options:
   logging: CLOUD_LOGGING_ONLY
