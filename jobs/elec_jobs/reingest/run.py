@@ -17,9 +17,9 @@ from datetime import date, datetime, timedelta, timezone
 import pandas as pd
 import requests
 
+from elec_jobs.ingest.run import fetch_eco2mix
 from elec_jobs.shared import config
 from elec_jobs.shared.bq import get_client, merge_to_bq
-from elec_jobs.ingest.run import fetch_eco2mix
 
 LOG = logging.getLogger(__name__)
 UTC = timezone.utc
