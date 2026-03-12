@@ -127,6 +127,17 @@ def load_metrics() -> pd.DataFrame:
     return _bq().query(sql).to_dataframe()
 
 
+@st.cache_data(ttl=3600)
+def load_metrics_history(days: int = 30) -> pd.DataFrame:
+    sql = f"""
+    SELECT region, computed_date, mae_mw
+    FROM `{PROJECT}.elec_ml.metrics`
+    WHERE computed_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {days} DAY)
+    ORDER BY computed_date, region
+    """
+    return _bq().query(sql).to_dataframe()
+
+
 @st.cache_data(ttl=300)
 def load_completeness() -> int:
     sql = f"""
@@ -348,6 +359,45 @@ def build_mae_bars(metrics_df: pd.DataFrame) -> go.Figure:
     return fig
 
 
+def build_mae_trend(history: pd.DataFrame) -> go.Figure:
+    regions = sorted(history[history["region"] != "France"]["region"].unique())
+    france  = history[history["region"] == "France"].sort_values("computed_date")
+
+    fig = go.Figure()
+    for region in regions:
+        df_r = history[history["region"] == region].sort_values("computed_date")
+        fig.add_trace(go.Scatter(
+            x=df_r["computed_date"], y=df_r["mae_mw"],
+            name=region, mode="lines",
+            line=dict(width=1.5, color=_C2),
+            opacity=0.45,
+            showlegend=False,
+            hovertemplate=f"<b>{region}</b><br>%{{x}}: <b>%{{y:,.0f}} MW</b><extra></extra>",
+        ))
+    if not france.empty:
+        fig.add_trace(go.Scatter(
+            x=france["computed_date"], y=france["mae_mw"],
+            name="France (total)", mode="lines+markers",
+            line=dict(width=2.5, color=_C4),
+            marker=dict(size=5),
+            hovertemplate="<b>France (total)</b><br>%{x}: <b>%{y:,.0f} MW</b><extra></extra>",
+        ))
+    fig.update_layout(
+        **_CANVAS,
+        title=dict(text="MAE trend — 7d rolling (per region · France total)", font=dict(size=14, color="#0F172A")),
+        xaxis=dict(**_AXIS, title="Date"),
+        yaxis=dict(**_AXIS, title="MAE (MW)", title_font=dict(color="#475569")),
+        legend=dict(
+            x=0.01, y=0.99, xanchor="left", yanchor="top",
+            bgcolor="white", bordercolor="#E2E8F0", borderwidth=1,
+            font=dict(size=12, color="#0F172A"),
+        ),
+        margin=dict(l=0, r=10, t=44, b=40),
+        height=340,
+    )
+    return fig
+
+
 def build_heatmap(forecasts: pd.DataFrame) -> go.Figure:
     df = forecasts.copy()
     df["hour_paris"] = df["forecast_horizon_dt"].dt.tz_convert("Europe/Paris").dt.hour
@@ -483,13 +533,14 @@ st.markdown("""
 # ─────────────────────────────────────────────────────────────────────────────
 
 with st.spinner("Loading…"):
-    forecasts    = load_latest_forecasts()
-    actuals      = load_actuals(hours=48)
-    status       = load_system_status()
-    metrics_df   = load_metrics()
-    n_complete   = load_completeness()
-    geojson      = load_france_geojson()
-    last_trained = load_last_trained_at()
+    forecasts       = load_latest_forecasts()
+    actuals         = load_actuals(hours=48)
+    status          = load_system_status()
+    metrics_df      = load_metrics()
+    metrics_history = load_metrics_history()
+    n_complete      = load_completeness()
+    geojson         = load_france_geojson()
+    last_trained    = load_last_trained_at()
 
 # Drop partial timestamps (API lag: not all 12 regions have reported yet)
 _N_REGIONS   = len(REGION_CENTROIDS)
@@ -669,6 +720,14 @@ with col_mae:
 with col_heat:
     st.plotly_chart(build_heatmap(forecasts), use_container_width=True)
 
+st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Row 3: MAE trend (full width)
+# ─────────────────────────────────────────────────────────────────────────────
+
+if not metrics_history.empty:
+    st.plotly_chart(build_mae_trend(metrics_history), use_container_width=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Footer

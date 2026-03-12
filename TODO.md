@@ -44,11 +44,11 @@
 - [x] Validate end-to-end pipeline: all 6 jobs run locally + on Cloud Run; dashboard shows predictions + freshness badges
 
 ## Monitoring & retraining
-- [ ] **Drift detection**: compute feature drift (PSI or KS test) on rolling window vs training distribution
-- [ ] **Prediction drift**: track MAE rolling 7d vs baseline MAE from training — alert if > 2× baseline
-- [ ] **Retrain trigger policy**: define threshold (e.g. MAE 7d avg > 150 MW) → manual or automated retrain
-- [ ] Add drift metrics to dashboard (separate monitoring tab or new KPI row)
-- [ ] Document retrain SOP in CLAUDE.md
+- [x] **Performance monitoring**: MAE trend chart on dashboard — rolling 7d MAE per region + France total over last 30 days (`load_metrics_history` + `build_mae_trend`)
+- [x] **MLflow auth**: SA invoker IAM (`mlflow_sa_invoker` in cloudrun.tf) + OIDC token injection in train job (`_fetch_identity_token`); local access via `gcloud run services proxy elec-mlflow --region europe-west9 --port 8080`
+- [x] **`cloudbuild.yaml` consolidated**: single file builds all 3 images + redeploys all Cloud Run Jobs + services on push to main
+- ~~Drift detection (PSI/KS)~~: not implemented — daily retrain + seasonal variance make statistical tests impractical at this cadence
+- ~~Automated retrain trigger~~: not implemented — daily retrain IS the policy; MAE spikes during seasonal transitions would cause runaway retrains
 
 ## Data retention policy
 - [ ] **BQ `elec_raw.eco2mix`**: set table expiration or partition expiry — keep 90 days rolling (raw data is cheap but grows fast)

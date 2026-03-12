@@ -321,7 +321,7 @@ All jobs share a single Docker image (`Dockerfile.jobs`); the `JOB_MODULE` envir
 - [x] `reingest` job — daily 01:30 Paris, re-fetches last 7d eco2mix + archive weather before features + train
 - [x] GitHub → Cloud Build trigger (CI on push to main — builds + deploys jobs, dashboard, MLflow)
 - [x] MLflow server on Cloud Run (SQLite↔GCS sync, auth-protected, scales to 0)
-- [ ] Drift monitoring: PSI/KS test on feature distributions, rolling MAE vs baseline
-- [ ] Automated retrain policy: trigger when 7-day MAE exceeds threshold
+- [x] MLflow auth fix — SA invoker IAM + OIDC token injection (Cloud Run → Cloud Run auth)
+- [x] Performance monitoring — MAE trend chart on dashboard (rolling 7d per region + France total); statistical drift tests not implemented (daily retrain + seasonal variance make them impractical at this scale)
 - [ ] Data retention: BQ partition expiry (raw 90d, features 30d) + GCS model rotation (keep last 3)
 - [ ] Unit tests (mock ODRÉ API, feature computation)
