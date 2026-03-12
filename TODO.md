@@ -51,11 +51,12 @@
 - ~~Automated retrain trigger~~: not implemented — daily retrain IS the policy; MAE spikes during seasonal transitions would cause runaway retrains
 
 ## Data retention policy
-- [ ] **BQ `elec_raw.eco2mix`**: set table expiration or partition expiry — keep 90 days rolling (raw data is cheap but grows fast)
-- [ ] **BQ `elec_features.features`**: keep 30 days (can be recomputed from raw)
-- [ ] **BQ `elec_ml.predictions`**: keep 90 days (needed for MAE computation and drift tracking)
-- [ ] **GCS models/**: keep last 3 model versions (by run_id), delete older artifacts
-- [ ] **GCS mlflow/**: SQLite DB stays (lightweight), artifact subdirs follow model retention
+- [x] **BQ `elec_raw.eco2mix`**: partition expiry 730 days (needed as JOIN target for training)
+- [x] **BQ `elec_raw.weather`**: partition expiry 730 days (needed for full feature recomputation)
+- [x] **BQ `elec_features.features`**: partition expiry 90 days (raw kept 730d for recompute if needed)
+- [x] **BQ `elec_ml.predictions`**: partition expiry 90 days
+- [x] **GCS models/**: keep last 7 model versions — `_prune_old_models()` in train job after each run
+- [x] **GCS mlflow/**: SQLite DB stays; matching artifact subdirs pruned alongside models
 
 ## Tests & quality
 - [ ] Unit tests `ingest` (mock ODRÉ API)

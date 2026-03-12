@@ -146,6 +146,49 @@ def _train(
     return booster, metrics
 
 
+def _prune_old_models(current_run_id: str, keep: int = 7) -> None:
+    """Delete GCS model artifacts beyond the `keep` most recent run_ids.
+
+    Also removes the matching MLflow artifact subdirectories so GCS doesn't
+    accumulate stale blobs (MLflow SQLite DB is unaffected — UI may show
+    missing artifacts for pruned runs, which is acceptable).
+    """
+    from google.cloud import storage
+    client = storage.Client(project=config.GCP_PROJECT_ID)
+    bucket = client.bucket(config.GCS_BUCKET)
+
+    # Collect run_id → earliest blob time under models/{run_id}/
+    run_times: dict[str, object] = {}
+    for blob in bucket.list_blobs(prefix="models/"):
+        parts = blob.name.split("/")
+        if len(parts) < 3:
+            continue  # skip models/latest_run_id
+        run_id = parts[1]
+        if run_id not in run_times or blob.time_created < run_times[run_id]:
+            run_times[run_id] = blob.time_created
+
+    if len(run_times) <= keep:
+        LOG.info("train: %d model versions on GCS — no pruning needed (keep=%d)", len(run_times), keep)
+        return
+
+    sorted_runs = sorted(run_times.items(), key=lambda x: x[1], reverse=True)
+    to_delete = {rid for rid, _ in sorted_runs[keep:]}
+    LOG.info("train: pruning %d old model version(s) from GCS: %s", len(to_delete), to_delete)
+
+    for rid in to_delete:
+        for b in bucket.list_blobs(prefix=f"models/{rid}/"):
+            b.delete()
+            LOG.info("train: deleted gs://%s/%s", config.GCS_BUCKET, b.name)
+
+    # Also remove matching MLflow artifact subdirs (mlflow/artifacts/{exp_id}/{run_id}/)
+    for blob in bucket.list_blobs(prefix="mlflow/artifacts/"):
+        parts = blob.name.split("/")
+        # mlflow/artifacts/{exp_id}/{run_id}/...
+        if len(parts) >= 4 and parts[3] in to_delete:
+            blob.delete()
+            LOG.info("train: deleted MLflow artifact gs://%s/%s", config.GCS_BUCKET, blob.name)
+
+
 def _write_latest_run_id(run_id: str) -> None:
     """Overwrite models/latest_run_id in GCS so the score job knows which model to use."""
     from google.cloud import storage
@@ -246,6 +289,7 @@ def main() -> None:
         if mlflow_active:
             mlflow.set_tag("gcs_model_blob", blob_name)
 
+    _prune_old_models(current_run_id=run_id, keep=7)
     LOG.info("train: done — run_id=%s  val_mae=%.1f MW", run_id, metrics["val_mae_mw"])
 
 

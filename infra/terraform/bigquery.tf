@@ -30,8 +30,9 @@ resource "google_bigquery_table" "eco2mix" {
   schema = file("${path.module}/schemas/eco2mix.json")
 
   time_partitioning {
-    type  = "DAY"
-    field = "date_heure"
+    type          = "DAY"
+    field         = "date_heure"
+    expiration_ms = 63072000000 # 730 days — needed as JOIN target for training
   }
 
   clustering = ["region"]
@@ -47,8 +48,9 @@ resource "google_bigquery_table" "weather" {
   schema = file("${path.module}/schemas/weather.json")
 
   time_partitioning {
-    type  = "DAY"
-    field = "date_heure"
+    type          = "DAY"
+    field         = "date_heure"
+    expiration_ms = 63072000000 # 730 days — needed for full feature recomputation
   }
 
   clustering = ["region"]
@@ -64,8 +66,9 @@ resource "google_bigquery_table" "features" {
   schema = file("${path.module}/schemas/features.json")
 
   time_partitioning {
-    type  = "DAY"
-    field = "date_heure"
+    type          = "DAY"
+    field         = "date_heure"
+    expiration_ms = 7776000000 # 90 days — raw (730d) retained for full recomputation if needed
   }
 
   clustering = ["region"]
@@ -81,8 +84,9 @@ resource "google_bigquery_table" "predictions" {
   schema = file("${path.module}/schemas/predictions.json")
 
   time_partitioning {
-    type  = "DAY"
-    field = "forecast_horizon_dt"
+    type          = "DAY"
+    field         = "forecast_horizon_dt"
+    expiration_ms = 7776000000 # 90 days
   }
 
   clustering = ["region"]
