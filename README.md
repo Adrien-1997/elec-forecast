@@ -323,6 +323,7 @@ All jobs share a single Docker image (`Dockerfile.jobs`); the `JOB_MODULE` envir
 - [x] MLflow server on Cloud Run (SQLite↔GCS sync, auth-protected, scales to 0)
 - [x] MLflow auth fix — SA invoker IAM + OIDC token injection (Cloud Run → Cloud Run auth)
 - [x] Performance monitoring — MAE trend chart on dashboard (rolling 7d per region + France total); statistical drift tests not implemented (daily retrain + seasonal variance make them impractical at this scale)
+- [x] MAE alerting — `metrics` job logs `ERROR MAE_ALERT` when France rolling-7d MAE > 400 MW; Cloud Monitoring log-based alert → email
 - [x] Data retention: BQ partition expiry (raw 730d, features 90d, predictions 90d) + GCS model rotation (keep last 7, pruned by train job)
 - [x] Post-deploy smoke tests in Cloud Build — dashboard HTTP health, eco2mix freshness, GCS model pointer, predictions freshness
 - [x] Unit tests + linting — 17 pytest tests (ingest pagination/mapping, feature holiday flags + SQL generation); ruff E/F/W/I

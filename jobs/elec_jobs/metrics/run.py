@@ -29,6 +29,7 @@ UTC = timezone.utc
 N_REGIONS = 12    # expected regions per slot for France aggregate
 EVAL_DAYS = 7     # rolling evaluation window
 ODRE_LAG_H = 2   # minimum hours before an actual is considered reliable
+MAE_ALERT_THRESHOLD_MW = 400  # France rolling-7d MAE above this triggers a log alert
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -133,6 +134,14 @@ def main() -> None:
         key_cols=("computed_date", "region"),
     )
     LOG.info("metrics: done")
+
+    if not france.empty:
+        mae_france = france.iloc[0]["mae_mw"]
+        if mae_france > MAE_ALERT_THRESHOLD_MW:
+            LOG.error(
+                "MAE_ALERT: France rolling-7d MAE exceeded threshold: %.1f MW > %d MW",
+                mae_france, MAE_ALERT_THRESHOLD_MW,
+            )
 
     for _, row in df.iterrows():
         LOG.info(
