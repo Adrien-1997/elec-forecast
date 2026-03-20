@@ -38,3 +38,7 @@ REGION_CENTROIDS: dict[str, tuple[str, float, float]] = {
     "84": ("Auvergne-Rhône-Alpes",       45.7597,  4.8422),
     "93": ("Provence-Alpes-Côte d'Azur", 43.9352,  6.0679),
 }
+
+# Sorted list of region names derived from REGION_CENTROIDS.
+# Used for consistent LightGBM categorical encoding across train and forecast runs.
+REGION_CATEGORIES: list[str] = sorted(v[0] for v in REGION_CENTROIDS.values())

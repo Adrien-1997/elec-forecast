@@ -19,9 +19,11 @@ from datetime import date, datetime, timezone
 
 import pandas as pd
 from google.cloud import bigquery
+from pydantic import ValidationError
 
 from elec_jobs.shared import config
 from elec_jobs.shared.bq import get_client, merge_to_bq
+from elec_jobs.shared.models import MetricsRecord
 
 LOG = logging.getLogger(__name__)
 UTC = timezone.utc
@@ -67,13 +69,17 @@ def _region_metrics(matched: pd.DataFrame) -> pd.DataFrame:
 
     rows = []
     for region, grp in matched.groupby("region"):
-        rows.append({
-            "region":        region,
-            "mae_mw":        grp["abs_error"].mean(),
-            "p95_error_mw":  grp["abs_error"].quantile(0.95),
-            "p99_error_mw":  grp["abs_error"].quantile(0.99),
-            "n_samples":     len(grp),
-        })
+        try:
+            record = MetricsRecord(
+                region=region,
+                mae_mw=grp["abs_error"].mean(),
+                p95_error_mw=grp["abs_error"].quantile(0.95),
+                p99_error_mw=grp["abs_error"].quantile(0.99),
+                n_samples=len(grp),
+            )
+            rows.append(record.model_dump())
+        except ValidationError as exc:
+            LOG.warning("metrics: skipping region %s — validation failed: %s", region, exc)
     return pd.DataFrame(rows)
 
 
@@ -95,13 +101,18 @@ def _france_metrics(matched: pd.DataFrame) -> pd.DataFrame:
     )
     france["abs_error"] = (france["predicted_mw"] - france["consommation"]).abs()
 
-    return pd.DataFrame([{
-        "region":        "France",
-        "mae_mw":        france["abs_error"].mean(),
-        "p95_error_mw":  france["abs_error"].quantile(0.95),
-        "p99_error_mw":  france["abs_error"].quantile(0.99),
-        "n_samples":     len(france),
-    }])
+    try:
+        record = MetricsRecord(
+            region="France",
+            mae_mw=france["abs_error"].mean(),
+            p95_error_mw=france["abs_error"].quantile(0.95),
+            p99_error_mw=france["abs_error"].quantile(0.99),
+            n_samples=len(france),
+        )
+        return pd.DataFrame([record.model_dump()])
+    except ValidationError as exc:
+        LOG.warning("metrics: France aggregate validation failed — %s", exc)
+        return pd.DataFrame()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -20,6 +20,7 @@ import requests
 from elec_jobs.ingest.run import fetch_eco2mix
 from elec_jobs.shared import config
 from elec_jobs.shared.bq import get_client, merge_to_bq
+from elec_jobs.shared.models import OpenMeteoResponse
 
 LOG = logging.getLogger(__name__)
 UTC = timezone.utc
@@ -49,14 +50,14 @@ def _fetch_weather_archive(start: date, end: date) -> pd.DataFrame:
             timeout=60,
         )
         resp.raise_for_status()
-        h = resp.json()["hourly"]
+        h = OpenMeteoResponse.model_validate(resp.json()).hourly
 
         frames.append(pd.DataFrame({
-            "date_heure":           pd.to_datetime(h["time"], utc=True),
+            "date_heure":           pd.to_datetime(h.time, utc=True),
             "region":               region,
-            "temperature_celsius":  h["temperature_2m"],
-            "wind_speed_kmh":       h["wind_speed_10m"],
-            "solar_radiation_wm2":  h["direct_radiation"],
+            "temperature_celsius":  h.temperature_2m,
+            "wind_speed_kmh":       h.wind_speed_10m,
+            "solar_radiation_wm2":  h.direct_radiation,
             "_ingested_at":         now,
         }))
 
