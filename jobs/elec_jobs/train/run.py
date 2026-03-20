@@ -34,9 +34,7 @@ from elec_jobs.shared.bq import get_client
 LOG = logging.getLogger(__name__)
 UTC = timezone.utc
 
-# Sorted list of region names — must match forecast/run.py REGION_CATEGORIES exactly.
-# Fixed order guarantees consistent LightGBM categorical label encoding across runs.
-REGION_CATEGORIES: list[str] = sorted(v[0] for v in config.REGION_CENTROIDS.values())
+REGION_CATEGORIES: list[str] = config.REGION_CATEGORIES
 
 FEATURE_COLS = [
     "region",                       # categorical — LightGBM native handling

@@ -30,13 +30,13 @@ from google.cloud import bigquery, storage
 
 from elec_jobs.shared import config, gcs
 from elec_jobs.shared.bq import get_client, merge_to_bq
+from elec_jobs.shared.models import ForecastRecord, OpenMeteoResponse
 
 LOG = logging.getLogger(__name__)
 UTC   = timezone.utc
 PARIS = ZoneInfo("Europe/Paris")
 
-# Sorted list of region names — must match train/run.py exactly.
-REGION_CATEGORIES: list[str] = sorted(v[0] for v in config.REGION_CENTROIDS.values())
+REGION_CATEGORIES: list[str] = config.REGION_CATEGORIES
 
 FEATURE_COLS = [
     "region",                       # categorical — LightGBM native handling
@@ -200,13 +200,13 @@ def _fetch_weather_forecast() -> pd.DataFrame:
             timeout=30,
         )
         resp.raise_for_status()
-        h = resp.json()["hourly"]
+        h = OpenMeteoResponse.model_validate(resp.json()).hourly
         frames.append(pd.DataFrame({
-            "hour_dt":             pd.to_datetime(h["time"], utc=True),
+            "hour_dt":             pd.to_datetime(h.time, utc=True),
             "region":              region,
-            "temperature_celsius": h["temperature_2m"],
-            "wind_speed_kmh":      h["wind_speed_10m"],
-            "solar_radiation_wm2": h["direct_radiation"],
+            "temperature_celsius": h.temperature_2m,
+            "wind_speed_kmh":      h.wind_speed_10m,
+            "solar_radiation_wm2": h.direct_radiation,
         }))
     return pd.concat(frames, ignore_index=True)
 
@@ -264,6 +264,20 @@ def main() -> None:
 
     preds = booster.predict(X)
     LOG.info("forecast: scored %d predictions", len(preds))
+
+    # ── Validate predictions before writing ───────────────────────────────────
+    from pydantic import ValidationError
+    try:
+        [
+            ForecastRecord(
+                forecast_horizon_dt=df.iloc[i]["forecast_horizon_dt"],
+                region=df.iloc[i]["region"],
+                predicted_mw=float(preds[i]),
+            )
+            for i in range(len(df))
+        ]
+    except ValidationError as exc:
+        raise RuntimeError(f"Prediction validation failed: {exc}") from exc
 
     # ── Write predictions (UPSERT on forecast_horizon_dt + region) ────────────
     out = pd.DataFrame({

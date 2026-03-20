@@ -21,6 +21,7 @@ from google.cloud import bigquery
 
 from elec_jobs.shared import config
 from elec_jobs.shared.bq import get_client, merge_to_bq
+from elec_jobs.shared.models import Eco2mixApiPage, OpenMeteoResponse
 
 LOG = logging.getLogger(__name__)
 UTC = timezone.utc
@@ -61,29 +62,29 @@ def fetch_eco2mix(since: datetime) -> pd.DataFrame:
         "offset": 0,
     }
 
-    rows = []
+    records = []
     while True:
         resp = requests.get(url, params=params, timeout=30)
         resp.raise_for_status()
-        batch = resp.json().get("results", [])
-        rows.extend(batch)
-        LOG.debug("eco2mix: fetched %d records (offset=%d)", len(batch), params["offset"])
-        if len(batch) < 100:
+        page = Eco2mixApiPage.model_validate(resp.json())
+        records.extend(page.results)
+        LOG.debug("eco2mix: fetched %d records (offset=%d)", len(page.results), params["offset"])
+        if len(page.results) < 100:
             break
         params["offset"] += 100
 
-    if not rows:
+    if not records:
         return pd.DataFrame()
 
     now = datetime.now(UTC)
     return pd.DataFrame([
         {
-            "date_heure":    pd.Timestamp(r["date_heure"]).tz_convert("UTC"),
-            "region":        r["libelle_region"],
-            "consommation":  float(r["consommation"]) if r.get("consommation") is not None else None,
+            "date_heure":    pd.Timestamp(r.date_heure).tz_convert("UTC"),
+            "region":        r.libelle_region,
+            "consommation":  r.consommation,
             "_ingested_at":  now,
         }
-        for r in rows
+        for r in records
     ])
 
 
@@ -118,14 +119,14 @@ def fetch_weather(since: datetime) -> pd.DataFrame:
             timeout=30,
         )
         resp.raise_for_status()
-        h = resp.json()["hourly"]
+        h = OpenMeteoResponse.model_validate(resp.json()).hourly
 
         df = pd.DataFrame({
-            "date_heure":           pd.to_datetime(h["time"], utc=True),
+            "date_heure":           pd.to_datetime(h.time, utc=True),
             "region":               region,
-            "temperature_celsius":  h["temperature_2m"],
-            "wind_speed_kmh":       h["wind_speed_10m"],
-            "solar_radiation_wm2":  h["direct_radiation"],
+            "temperature_celsius":  h.temperature_2m,
+            "wind_speed_kmh":       h.wind_speed_10m,
+            "solar_radiation_wm2":  h.direct_radiation,
             "_ingested_at":         now,
         })
         df = df[df["date_heure"] > since]
